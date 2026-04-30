@@ -1,0 +1,19 @@
+.DS_Store
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Models / cache
+cache/
+~/.cache/relighting_engine/
+
+# Editor
+.idea/
+.vscode/
+*.swp
