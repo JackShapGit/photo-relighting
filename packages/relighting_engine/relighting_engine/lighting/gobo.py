@@ -65,16 +65,9 @@ def _perspective_uv(P: torch.Tensor, light: Light) -> torch.Tensor:
     fwd = torch.clamp(fwd, min=1e-4)
     plane_u = (rel * u_axis).sum(dim=-1) / fwd.squeeze(-1)
     plane_v = (rel * v_axis).sum(dim=-1) / fwd.squeeze(-1)
-    # Adjusted factor (plan §4.5 note): the pixel at grid index h//2 on a
-    # linspace(0,1,h) grid lands at ~0.667 (not 0.5), i.e. ~1/6 world-units
-    # from the cone axis.  With cone_angle=0.6 the standard 2× denominator
-    # maps that to UV 0.622 (> ±0.05 from centre).  Using 4× brings it to
-    # 0.561, still outside.  Factor 5 gives 0.549, within tolerance.  This
-    # means the cone edge maps to UV ≈ 0.60/0.40 rather than 1.0/0.0 — a
-    # conservative padding that keeps the gobo centred on typical subjects.
     half = math.tan(max(light.cone_angle, 1e-3))
-    u = 0.5 + plane_u / (5 * half)
-    v = 0.5 + plane_v / (5 * half)
+    u = 0.5 + plane_u / (2 * half)
+    v = 0.5 + plane_v / (2 * half)
     return torch.stack([u, v], dim=-1)
 
 

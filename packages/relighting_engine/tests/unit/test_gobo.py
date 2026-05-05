@@ -30,7 +30,7 @@ def grid() -> tuple[torch.Tensor, torch.Tensor]:
 def test_spotlight_perspective_centered() -> None:
     """A spotlight aimed straight along +z from (0.5,0.5,-1): the screen-center
     pixel projects to UV (0.5, 0.5). Off-center pixels project away from center."""
-    h, w = 4, 4
+    h, w = 5, 5
     xs = torch.linspace(0.0, 1.0, w)
     ys = torch.linspace(0.0, 1.0, h)
     Y, X = torch.meshgrid(ys, xs, indexing="ij")
