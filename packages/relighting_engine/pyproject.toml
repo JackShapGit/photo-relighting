@@ -19,6 +19,8 @@ dependencies = [
     "einops>=0.7",
     "depth-anything-3 @ git+https://github.com/ByteDance-Seed/depth-anything-3@41736238f5bced4debf3f2a12375d2466874866d",
     "addict>=2.4",  # transitive dep of depth-anything-3 not declared upstream
+    "kornia>=0.7",  # required by briaai/RMBG-2.0 custom model code
+    "timm>=0.9",    # required by briaai/RMBG-2.0 custom model code
     # torch / torchvision installed separately from PyTorch's index in Step 1.7
 ]
 
