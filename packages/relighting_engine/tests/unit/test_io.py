@@ -116,3 +116,16 @@ def test_invalid_format_bitdepth_combos_raise(tmp_path: Path) -> None:
         write_image(tmp_path / "x.jpg", src, format="jpeg", bit_depth=16)
     with pytest.raises(ValueError):
         write_image(tmp_path / "x.png", src, format="png", bit_depth=32)
+
+
+def test_read_heic_if_sample_present() -> None:
+    """HEIC support depends on libheif being bundled in the wheel.
+    pillow-heif ships pre-built wheels for Windows x86_64 with libheif inside.
+    Drop a sample.heic into tests/fixtures/images/ to exercise this path."""
+    sample = FIXTURES / "sample.heic"
+    if not sample.exists():
+        pytest.skip("No HEIC sample present (drop sample.heic in fixtures to enable)")
+    img, meta = read_image(sample)
+    assert img.dtype == np.float32
+    assert img.ndim == 3 and img.shape[2] == 3
+    assert meta.original_format in ("HEIF", "HEIC")
