@@ -3,6 +3,10 @@
 Internal working space: float32, linear sRGB, shape (H, W, 3), range [0, 1].
 On read: gamma-decode sRGB -> linear. On write: gamma-encode linear -> sRGB.
 Alpha is discarded with a metadata flag. ICC profile presence is recorded.
+
+Importing this module registers the HEIC opener globally with Pillow as a
+side effect (via ``pillow_heif.register_heif_opener()``). This is intentional
+and idempotent.
 """
 from __future__ import annotations
 
@@ -64,8 +68,8 @@ def _read_tiff(path: Path) -> tuple[np.ndarray, int, bool, bool]:
         img_pil = Image.open(path)
         icc_present = bool(img_pil.info.get("icc_profile"))
         alpha_present = img_pil.mode in ("RGBA", "LA", "PA") or "A" in img_pil.mode
-    except Exception:
-        pass  # float32 TIFFs are not openable by Pillow — that's fine
+    except (Image.UnidentifiedImageError, OSError):
+        pass  # float32 TIFFs / unsupported headers — IO continues via imageio
 
     arr = iio.imread(path)
     if arr.ndim == 2:
@@ -131,6 +135,10 @@ def read_image(path: str | Path) -> tuple[np.ndarray, ImageMetadata]:
 
     Supported: JPEG/PNG/TIFF/HEIC. Bit depths: 8/16 (PNG, TIFF), 32-float (TIFF).
     Alpha is discarded; the metadata flag records whether it was present.
+
+    Note: `metadata.original_bit_depth` reports the *observed* bit depth from
+    the source array, not the format-canonical bit depth. For format/bit-depth
+    consistency on output, see `write_image`.
     """
     path = Path(path)
     suffix = path.suffix.lower()

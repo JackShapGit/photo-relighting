@@ -36,13 +36,15 @@ def test_read_jpeg_returns_linear_float32(tmp_path: Path) -> None:
 
 
 def test_read_jpeg_is_gamma_decoded(tmp_path: Path) -> None:
-    """sRGB 50% gray (128/255) should decode to ~0.2159 linear, not 0.5."""
+    """sRGB 50% gray (128/255 = 0.5020) should decode to ~0.2159 linear via the proper
+    sRGB transfer function — NOT (x/255)**2.2 (~0.218) or (x/255)**2.4 (~0.196)."""
     arr = np.full((4, 4, 3), 128, dtype=np.uint8)
     p = tmp_path / "gray.jpg"
     Image.fromarray(arr).save(p, quality=100)
     img, _ = read_image(p)
-    # Allow JPEG quantization slack; linear value should be near 0.2159.
-    assert 0.18 < img.mean() < 0.25, f"expected linear gray ~0.21, got {img.mean()}"
+    # Tolerance 0.005 distinguishes the proper IEC 61966-2-1 transfer (~0.2159)
+    # from common gamma 2.2/2.4 approximations.
+    assert abs(img.mean() - 0.2159) < 0.005, f"expected ~0.2159, got {img.mean()}"
 
 
 def test_read_png_8bit(tmp_path: Path) -> None:
@@ -64,8 +66,9 @@ def test_read_png_16bit(tmp_path: Path) -> None:
     cv2.imwrite(str(p), arr)
     img, meta = read_image(p)
     assert meta.original_bit_depth == 16
-    # 32768/65535 ≈ 0.5 sRGB → ~0.2140 linear
-    assert 0.18 < img.mean() < 0.25
+    # 32768/65535 = 0.50001 sRGB → 0.21405 linear. PNG is bit-exact (no quantization),
+    # so the tolerance can be much tighter than the JPEG case.
+    assert abs(img.mean() - 0.2140) < 1e-3
 
 
 def test_read_tiff_32float(tmp_path: Path) -> None:
