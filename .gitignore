@@ -1,19 +1,36 @@
-.DS_Store
-.claude/
-
 # Python
 __pycache__/
+*.pyc
+*.pyo
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
+build/
+dist/
 .pytest_cache/
+.ruff_cache/
 
-# Models / cache
+# Project
 cache/
 ~/.cache/relighting_engine/
+node_modules/
+.playwright/
+test-results/
+playwright-report/
 
-# Editor
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
 .idea/
 .vscode/
 *.swp
+
+# Tooling
+.claude/
+*.log
+
+# Models (downloaded by scripts/download_models.py)
+models/

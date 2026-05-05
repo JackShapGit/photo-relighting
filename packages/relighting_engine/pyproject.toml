@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "relighting-engine"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+description = "Controllable depth-based photo relighting engine."
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "pillow>=10.2",
+    "pillow-heif>=0.18",
+    "imageio[tifffile]>=2.34",
+    "scipy>=1.12",
+    "transformers>=4.41",
+    "huggingface_hub>=0.23",
+    "einops>=0.7",
+    "depth-anything-3 @ git+https://github.com/ByteDance-Seed/depth-anything-3@41736238f5bced4debf3f2a12375d2466874866d",
+    # torch / torchvision installed separately from PyTorch's index in Step 1.7
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "scikit-image>=0.22",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["relighting_engine*"]
