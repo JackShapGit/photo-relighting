@@ -1,7 +1,14 @@
 // Floating handles over the canvas. Drag updates light.position.x/y.
 // Shift-drag rotates direction. Wheel adjusts position.z.
+// Colors come from the CSS slot palette (--slot-key|fill|rim) so the panel
+// indicators next to "Key/Fill/Rim" match the on-canvas anchor colors.
 
-const HANDLE_COLORS = { 0: '#ffd966', 1: '#9fc5e8', 2: '#ea9999' };
+const SLOT_VARS = ['--slot-key', '--slot-fill', '--slot-rim'];
+
+function slotColor(i) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(SLOT_VARS[i] || '').trim();
+  return v || '#fff';
+}
 
 export function mountHandles(state, redraw) {
   const root = document.getElementById('handles');
@@ -9,7 +16,7 @@ export function mountHandles(state, redraw) {
   const els = state.lights.map((L, i) => {
     const el = document.createElement('div');
     el.className = 'handle';
-    el.style.background = HANDLE_COLORS[i] || '#fff';
+    el.style.background = slotColor(i);
     root.appendChild(el);
     return el;
   });

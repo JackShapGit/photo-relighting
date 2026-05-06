@@ -1,18 +1,38 @@
+/* Slot colors (handles + panel indicators read these). */
+:root {
+  --slot-key:  #ffd966;
+  --slot-fill: #9fc5e8;
+  --slot-rim:  #ea9999;
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; background: #111; color: #ddd; }
 header { display: flex; gap: 12px; align-items: center; padding: 8px 12px; background: #1a1a1a; }
 header h1 { font-size: 14px; margin: 0; }
+header .header-toggle { font-size: 12px; display: flex; align-items: center; gap: 4px; }
 main { display: flex; height: calc(100% - 44px); }
 #stage { position: relative; flex: 1; background: #000; }
 #canvas { display: block; width: 100%; height: 100%; }
 #handles { position: absolute; inset: 0; pointer-events: none; }
+#handles[hidden] { display: none; }
 .handle { position: absolute; width: 18px; height: 18px; border-radius: 50%;
           border: 2px solid #fff; transform: translate(-50%, -50%); pointer-events: auto; cursor: grab; }
 .handle.dragging { cursor: grabbing; }
 #controls { width: 320px; padding: 12px; overflow-y: auto; background: #1d1d1d;
             border-left: 1px solid #2a2a2a; }
 .light-row { padding: 6px 0; border-bottom: 1px solid #2a2a2a; }
-.light-row h3 { margin: 4px 0 6px; font-size: 13px; }
+.light-row h3 { margin: 4px 0 6px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.light-row h3::before {
+  content: '';
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--slot-color, #fff);
+  border: 1px solid #444;
+}
+.light-row[data-slot="key"]  { --slot-color: var(--slot-key); }
+.light-row[data-slot="fill"] { --slot-color: var(--slot-fill); }
+.light-row[data-slot="rim"]  { --slot-color: var(--slot-rim); }
 .light-row label { display: flex; align-items: center; gap: 6px; font-size: 12px; margin: 3px 0; }
 .light-row input[type="range"], .light-row select { flex: 1; }
 button, input, select { background: #222; color: #ddd; border: 1px solid #333; padding: 4px; }

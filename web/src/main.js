@@ -45,6 +45,10 @@ document.addEventListener('relight:prepared', async () => {
   }
 })();
 
+document.getElementById('show-anchors').addEventListener('change', (ev) => {
+  document.getElementById('handles').hidden = !ev.target.checked;
+});
+
 document.getElementById('export-btn').addEventListener('click', async () => {
   if (!state.sessionId) return;
   const body = {
