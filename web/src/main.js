@@ -26,6 +26,7 @@ document.addEventListener('relight:prepared', async () => {
   mountHandles(state, redraw);
   mountControls(state, redraw);
   redraw();
+  document.addEventListener('relight:redraw', redraw);
 });
 
 (async () => {

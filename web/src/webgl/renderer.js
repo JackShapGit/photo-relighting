@@ -43,7 +43,7 @@ function resolveColor(L) {
 }
 
 export async function init(canvas) {
-  gl = canvas.getContext('webgl2', { antialias: false, premultipliedAlpha: false });
+  gl = canvas.getContext('webgl2', { antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
   if (!gl) throw new Error('WebGL2 unavailable');
 
   const vsSrc = await (await fetch('/web/src/webgl/shaders/relight.vert')).text();
