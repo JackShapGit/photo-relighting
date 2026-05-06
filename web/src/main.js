@@ -1,6 +1,6 @@
 import { newState } from './lights.js';
 import { prepare, listGobos } from './api.js';
-// renderer + controls modules wired up in later tasks.
+import { init as initRenderer, setAssets, draw } from './webgl/renderer.js';
 
 const state = newState();
 
@@ -13,8 +13,14 @@ document.getElementById('file').addEventListener('change', async (ev) => {
   state.width = resp.width;
   state.height = resp.height;
   state.assetUrls = resp.assets;
-  // Renderer init happens in Task 23.
   document.dispatchEvent(new CustomEvent('relight:prepared'));
+});
+
+document.addEventListener('relight:prepared', async () => {
+  const canvas = document.getElementById('canvas');
+  await initRenderer(canvas);
+  await setAssets(state.assetUrls, canvas);
+  draw(state);
 });
 
 (async () => {
