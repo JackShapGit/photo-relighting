@@ -1,6 +1,7 @@
 import { newState } from './lights.js';
 import { prepare, listGobos } from './api.js';
 import { init as initRenderer, setAssets, draw } from './webgl/renderer.js';
+import { mountHandles } from './handles.js';
 
 const state = newState();
 
@@ -20,7 +21,9 @@ document.addEventListener('relight:prepared', async () => {
   const canvas = document.getElementById('canvas');
   await initRenderer(canvas);
   await setAssets(state.assetUrls, canvas);
-  draw(state);
+  const redraw = () => draw(state);
+  mountHandles(state, redraw);
+  redraw();
 });
 
 (async () => {
