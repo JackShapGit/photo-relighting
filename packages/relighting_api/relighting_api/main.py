@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from relighting_api.routes import gobos as gobos_route
 from relighting_api.routes import health as health_route
 from relighting_api.routes import prepare as prepare_route
+from relighting_api.routes import render as render_route
 from relighting_api.session_store import SessionStore
 
 CACHE_DIR = Path(os.environ.get("RELIGHT_CACHE_DIR", "cache/sessions"))
@@ -23,6 +24,7 @@ def create_app(skip_engine: bool = False) -> FastAPI:
     app.include_router(health_route.router)
     app.include_router(gobos_route.router)
     app.include_router(prepare_route.router)
+    app.include_router(render_route.router)
 
     # Serve gobo PNGs and per-session asset PNGs.
     static_root = (
