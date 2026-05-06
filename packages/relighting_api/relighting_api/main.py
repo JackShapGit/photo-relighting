@@ -39,6 +39,10 @@ def create_app(skip_engine: bool = False) -> FastAPI:
     cache_root.mkdir(parents=True, exist_ok=True)
     app.mount("/cache", StaticFiles(directory=str(cache_root)), name="cache")
 
+    web_dir = Path(__file__).resolve().parents[3] / "web"
+    if web_dir.exists():
+        app.mount("/web", StaticFiles(directory=str(web_dir), html=True), name="web")
+
     return app
 
 
