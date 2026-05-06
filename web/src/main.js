@@ -1,5 +1,5 @@
 import { newState } from './lights.js';
-import { prepare, listGobos } from './api.js';
+import { prepare, listGobos, render as serverRender } from './api.js';
 import { init as initRenderer, setAssets, draw } from './webgl/renderer.js';
 import { mountHandles } from './handles.js';
 import { mountControls } from './controls.js';
@@ -43,5 +43,23 @@ document.addEventListener('relight:prepared', async () => {
     console.warn('gobo preset list failed', e);
   }
 })();
+
+document.getElementById('export-btn').addEventListener('click', async () => {
+  if (!state.sessionId) return;
+  const body = {
+    session_id: state.sessionId,
+    lights: state.lights,
+    ambient: state.ambient,
+    output_format: 'png',
+    output_bit_depth: 8,
+  };
+  const blob = await serverRender(body);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `relit-${Date.now()}.png`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
 
 window.__state = state;  // for console debugging
