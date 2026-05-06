@@ -6,6 +6,42 @@ let gl, program, vao, locs;
 let texOriginal, texDepth, texNormals, texMask;
 const goboTextures = new Map();   // gobo_id -> WebGLTexture
 
+// ---------------------------------------------------------------------------
+// Kelvin → linear-RGB, white-balanced to 5500 K (matches gels.py parity).
+// ---------------------------------------------------------------------------
+function _kelvinRaw(t) {
+  // t is k/100 already, in [10, 400]. Returns un-normalized RGB.
+  let r, g, b;
+  if (t <= 66) r = 1.0;
+  else r = Math.min(1, Math.max(0, 329.698727446 * Math.pow(t - 60, -0.1332047592) / 255));
+  if (t <= 66) g = (99.4708025861 * Math.log(t) - 161.1195681661) / 255;
+  else g = (288.1221695283 * Math.pow(t - 60, -0.0755148492)) / 255;
+  g = Math.min(1, Math.max(0, g));
+  if (t >= 66) b = 1.0;
+  else if (t <= 19) b = 0.0;
+  else b = Math.min(1, Math.max(0, (138.5177312231 * Math.log(t - 10) - 305.0447927307) / 255));
+  return [r, g, b];
+}
+
+const _REF_5500 = _kelvinRaw(55);  // ~(1.0, 0.931, 0.871)
+
+function kelvinToRGB(k) {
+  k = Math.max(1000, Math.min(40000, k));
+  const raw = _kelvinRaw(k / 100);
+  return [
+    Math.min(1, Math.max(0, raw[0] / _REF_5500[0])),
+    Math.min(1, Math.max(0, raw[1] / _REF_5500[1])),
+    Math.min(1, Math.max(0, raw[2] / _REF_5500[2])),
+  ];
+}
+
+function resolveColor(L) {
+  const isWhite = L.color[0] === 1 && L.color[1] === 1 && L.color[2] === 1;
+  if (!isWhite) return L.color;
+  if (L.color_temperature != null) return kelvinToRGB(L.color_temperature);
+  return L.color;
+}
+
 export async function init(canvas) {
   gl = canvas.getContext('webgl2', { antialias: false, premultipliedAlpha: false });
   if (!gl) throw new Error('WebGL2 unavailable');
@@ -91,6 +127,24 @@ export async function setAssets(urls, canvas) {
                 : null;
 }
 
+export async function ensureGoboTexture(goboId) {
+  if (goboTextures.has(goboId)) return goboTextures.get(goboId);
+  const slug = goboId.replace(/^preset:/, '');
+  const url = `/static/gobos/${slug}.png`;
+  const img = await new Promise((res, rej) => {
+    const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url;
+  });
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, img);
+  goboTextures.set(goboId, t);
+  return t;
+}
+
 export function draw(state) {
   const c = gl.canvas;
   const w = c.clientWidth, h = c.clientHeight;
@@ -107,6 +161,7 @@ export function draw(state) {
   gl.uniform1f(locs.u_ambient, state.ambient);
   gl.uniform1i(locs.u_debugView, encodeDebugView(state.debugView));
 
+  state.gelResolved = state.lights.map(L => ({ ...L, color: resolveColor(L) }));
   uploadLights(state.lights, state.gelResolved || state.lights);
 
   gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -146,5 +201,39 @@ function uploadLights(lights, lightsResolved) {
   gl.uniform1iv(locs.affects, affects);
   gl.uniform1iv(locs.enabled, enabled);
   gl.uniform1iv(locs.hasGobo, hasGobo);
-  // gobo transforms uploaded in Task 26 when gobo controls land.
+
+  // Gobo transform arrays
+  const goboScale = new Float32Array(8);
+  const goboRotation = new Float32Array(8);
+  const goboOffset = new Float32Array(8 * 2);
+  const goboInvert = new Int32Array(8);
+  for (let i = 0; i < N; i++) {
+    const L = lights[i];
+    if (L.gobo) {
+      goboScale[i] = L.gobo.scale ?? 1;
+      goboRotation[i] = L.gobo.rotation ?? 0;
+      goboOffset[i * 2] = L.gobo.offset?.[0] ?? 0;
+      goboOffset[i * 2 + 1] = L.gobo.offset?.[1] ?? 0;
+      goboInvert[i] = L.gobo.invert ? 1 : 0;
+    }
+  }
+
+  // Bind gobo textures to units 4..11 and set sampler uniforms
+  for (let i = 0; i < N; i++) {
+    if (lights[i].gobo) {
+      const tex = goboTextures.get(lights[i].gobo.texture_id);
+      if (tex) {
+        gl.activeTexture(gl.TEXTURE0 + 4 + i);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+      }
+    }
+  }
+  for (let i = 0; i < 8; i++) {
+    if (locs.u_goboTex[i] !== null) gl.uniform1i(locs.u_goboTex[i], 4 + i);
+  }
+
+  gl.uniform1fv(locs.goboScale, goboScale);
+  gl.uniform1fv(locs.goboRotation, goboRotation);
+  gl.uniform2fv(locs.goboOffset, goboOffset);
+  gl.uniform1iv(locs.goboInvert, goboInvert);
 }
