@@ -1,0 +1,144 @@
+#version 300 es
+precision highp float;
+precision highp int;
+
+#define MAX_LIGHTS 8
+
+in vec2 v_uv;
+out vec4 fragColor;
+
+uniform sampler2D u_original;     // sRGB texture; sample → linear via internalformat
+uniform sampler2D u_depth;        // R channel = depth
+uniform sampler2D u_normals;      // (n*0.5 + 0.5) RGB
+uniform sampler2D u_mask;
+uniform int u_haveMask;
+uniform float u_ambient;
+uniform int u_debugView;
+
+uniform int  u_l_type[MAX_LIGHTS];
+uniform vec3 u_l_position[MAX_LIGHTS];
+uniform vec3 u_l_direction[MAX_LIGHTS];
+uniform vec3 u_l_color[MAX_LIGHTS];
+uniform float u_l_intensity[MAX_LIGHTS];
+uniform float u_l_falloff[MAX_LIGHTS];
+uniform float u_l_cone_angle[MAX_LIGHTS];
+uniform float u_l_softness[MAX_LIGHTS];
+uniform int  u_l_affects[MAX_LIGHTS];
+uniform int  u_l_enabled[MAX_LIGHTS];
+uniform int  u_l_hasGobo[MAX_LIGHTS];
+uniform sampler2D u_goboTex[MAX_LIGHTS];
+uniform float u_l_goboScale[MAX_LIGHTS];
+uniform float u_l_goboRotation[MAX_LIGHTS];
+uniform vec2  u_l_goboOffset[MAX_LIGHTS];
+uniform int   u_l_goboInvert[MAX_LIGHTS];
+
+uniform int u_lightCount;
+
+float saturate1(float x) { return clamp(x, 0.0, 1.0); }
+
+vec2 ortho_uv(vec3 P, vec3 d_in) {
+  vec3 d = normalize(d_in);
+  vec3 up = abs(d.y) > 0.95 ? vec3(1, 0, 0) : vec3(0, 1, 0);
+  vec3 ux = normalize(cross(up, d));
+  vec3 vx = normalize(cross(d, ux));
+  return vec2(dot(P, ux), dot(P, vx)) + 0.5;
+}
+
+vec2 perspective_uv(vec3 P, vec3 pos, vec3 d_in, float cone_angle) {
+  vec3 d = normalize(d_in);
+  vec3 up = abs(d.y) > 0.95 ? vec3(1, 0, 0) : vec3(0, 1, 0);
+  vec3 ux = normalize(cross(up, d));
+  vec3 vx = normalize(cross(d, ux));
+  vec3 rel = P - pos;
+  float fwd = max(dot(rel, d), 1e-4);
+  float pu = dot(rel, ux) / fwd;
+  float pv = dot(rel, vx) / fwd;
+  float half_t = tan(max(cone_angle, 1e-3));
+  return vec2(0.5 + pu / (2.0 * half_t), 0.5 + pv / (2.0 * half_t));
+}
+
+vec2 equirect_uv(vec3 P, vec3 pos) {
+  vec3 L = normalize(P - pos);
+  float theta = atan(L.x, L.z);
+  float phi = asin(clamp(L.y, -1.0, 1.0));
+  return vec2(0.5 + theta / 6.283185, 0.5 + phi / 3.141593);
+}
+
+float sample_gobo(int i, vec2 uv) {
+  // WebGL2 doesn't allow dynamic indexing of sampler arrays; expand a switch.
+  // For MVP we keep gobo sampling simple — only key/fill/rim use gobos via slots 0..2.
+  if (i == 0) return texture(u_goboTex[0], uv).r;
+  if (i == 1) return texture(u_goboTex[1], uv).r;
+  if (i == 2) return texture(u_goboTex[2], uv).r;
+  if (i == 3) return texture(u_goboTex[3], uv).r;
+  if (i == 4) return texture(u_goboTex[4], uv).r;
+  if (i == 5) return texture(u_goboTex[5], uv).r;
+  if (i == 6) return texture(u_goboTex[6], uv).r;
+  if (i == 7) return texture(u_goboTex[7], uv).r;
+  return 1.0;
+}
+
+void main() {
+  vec3 original = texture(u_original, v_uv).rgb;  // already linear (sRGB sampler)
+  float depth = texture(u_depth, v_uv).r;
+  vec3 N = texture(u_normals, v_uv).rgb * 2.0 - 1.0;
+  N = normalize(N);
+  float maskV = u_haveMask == 1 ? texture(u_mask, v_uv).r : 1.0;
+
+  if (u_debugView == 1) { fragColor = vec4(vec3(depth), 1.0); return; }
+  if (u_debugView == 2) { fragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
+  if (u_debugView == 3) { fragColor = vec4(vec3(maskV), 1.0); return; }
+
+  vec3 P = vec3(v_uv.x, v_uv.y, depth);
+
+  vec3 total = u_ambient * original;
+  for (int i = 0; i < MAX_LIGHTS; i++) {
+    if (i >= u_lightCount) break;
+    if (u_l_enabled[i] == 0) continue;
+
+    vec3 Lvec; float atten;
+    if (u_l_type[i] == 0) {  // directional
+      Lvec = normalize(-u_l_direction[i]);
+      atten = 1.0;
+    } else {
+      vec3 d = u_l_position[i] - P;
+      float dist = length(d) + 1e-6;
+      Lvec = d / dist;
+      atten = 1.0 / (1.0 + u_l_falloff[i] * dist * dist);
+    }
+
+    float cone = 1.0;
+    if (u_l_type[i] == 2) {
+      vec3 dn = normalize(u_l_direction[i]);
+      float cone_dot = dot(dn, -Lvec);
+      float inner = cos(max(u_l_cone_angle[i] - u_l_softness[i] * 0.5, 1e-4));
+      float outer = cos(u_l_cone_angle[i] + u_l_softness[i] * 0.5);
+      cone = saturate1((cone_dot - outer) / (inner - outer + 1e-6));
+    }
+
+    float gobo = 1.0;
+    if (u_l_hasGobo[i] == 1) {
+      vec2 uv;
+      if (u_l_type[i] == 0) uv = ortho_uv(P, u_l_direction[i]);
+      else if (u_l_type[i] == 2)
+        uv = perspective_uv(P, u_l_position[i], u_l_direction[i], u_l_cone_angle[i]);
+      else uv = equirect_uv(P, u_l_position[i]);
+      vec2 c = uv - 0.5;
+      float cs = cos(u_l_goboRotation[i]), sn = sin(u_l_goboRotation[i]);
+      vec2 r = vec2(cs * c.x - sn * c.y, sn * c.x + cs * c.y);
+      uv = r * u_l_goboScale[i] + 0.5 + u_l_goboOffset[i];
+      gobo = sample_gobo(i, uv);
+      if (u_l_goboInvert[i] == 1) gobo = 1.0 - gobo;
+    }
+
+    float diff = max(dot(N, Lvec), 0.0);
+    float maskW = u_l_affects[i] == 0 ? 1.0
+                : u_l_affects[i] == 1 ? maskV
+                : (1.0 - maskV);
+
+    total += original * u_l_color[i] * u_l_intensity[i] * diff * atten * cone * gobo * maskW;
+  }
+
+  total = clamp(total, vec3(0.0), vec3(1.0));
+  fragColor = vec4(total, 1.0);
+}
