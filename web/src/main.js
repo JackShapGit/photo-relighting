@@ -6,6 +6,26 @@ import { mountControls } from './controls.js';
 
 const state = newState();
 
+function fitCanvasWrap() {
+  // Size #canvas-wrap to fit #stage while preserving the image's aspect ratio.
+  // Letterboxes on whichever axis is the constraint. Called on prepare and resize.
+  const stage = document.getElementById('stage');
+  const wrap = document.getElementById('canvas-wrap');
+  if (!state.width || !state.height) return;
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  const ar = state.width / state.height;
+  let w, h;
+  if (sw / sh > ar) { h = sh; w = Math.round(h * ar); }
+  else { w = sw; h = Math.round(w / ar); }
+  wrap.style.width = `${w}px`;
+  wrap.style.height = `${h}px`;
+}
+
+window.addEventListener('resize', () => {
+  fitCanvasWrap();
+  if (state.sessionId) document.dispatchEvent(new Event('relight:redraw'));
+});
+
 document.getElementById('file').addEventListener('change', async (ev) => {
   const f = ev.target.files?.[0];
   if (!f) return;
@@ -19,6 +39,7 @@ document.getElementById('file').addEventListener('change', async (ev) => {
 });
 
 document.addEventListener('relight:prepared', async () => {
+  fitCanvasWrap();  // size the wrap before WebGL reads canvas.clientWidth/Height
   const canvas = document.getElementById('canvas');
   await initRenderer(canvas);
   await setAssets(state.assetUrls, canvas);

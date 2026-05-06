@@ -11,7 +11,10 @@ header { display: flex; gap: 12px; align-items: center; padding: 8px 12px; backg
 header h1 { font-size: 14px; margin: 0; }
 header .header-toggle { font-size: 12px; display: flex; align-items: center; gap: 4px; }
 main { display: flex; height: calc(100% - 44px); }
-#stage { position: relative; flex: 1; background: #000; }
+#stage { position: relative; flex: 1; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+/* canvas-wrap is sized by JS to fit #stage while preserving the image aspect
+   ratio (letterboxing on the short axis). canvas + handles fill the wrap. */
+#canvas-wrap { position: relative; }
 #canvas { display: block; width: 100%; height: 100%; }
 #handles { position: absolute; inset: 0; pointer-events: none; }
 #handles[hidden] { display: none; }
