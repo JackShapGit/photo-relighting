@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from relighting_api.schemas import GoboModel, LightModel, RenderRequest
+from relighting_api.schemas import GoboModel, LightModel, PolishRequest, RenderRequest
 
 
 def test_light_model_validates_known_good() -> None:
@@ -56,3 +56,28 @@ def test_render_request_allows_tiff_32bit() -> None:
         output_format="tiff", output_bit_depth=32,
     )
     assert r.output_format == "tiff"
+
+
+def test_polish_request_minimal_construction() -> None:
+    req = PolishRequest(session_id="abc", lights=[])
+    assert req.session_id == "abc"
+    assert req.prompt == ""
+    assert req.seed is None
+    assert req.ambient == 0.2
+    assert req.shadow_style == "off"
+    assert req.output_format == "png"
+    assert req.output_bit_depth == 8
+
+
+def test_polish_request_accepts_prompt_and_seed() -> None:
+    req = PolishRequest(
+        session_id="abc", lights=[], prompt="warm sunset", seed=42,
+    )
+    assert req.prompt == "warm sunset"
+    assert req.seed == 42
+
+
+def test_polish_request_validates_format_bitdepth() -> None:
+    with pytest.raises(Exception):
+        PolishRequest(session_id="abc", lights=[],
+                      output_format="jpeg", output_bit_depth=16)

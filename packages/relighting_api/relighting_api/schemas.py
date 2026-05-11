@@ -66,16 +66,18 @@ class LightModel(BaseModel):
         return l
 
 
-class RenderRequest(BaseModel):
+class RenderCommon(BaseModel):
+    """Shared base for /render and /polish — lights, ambient, shadow, output format."""
     session_id: str
     lights: list[LightModel] = Field(default_factory=list)
     ambient: Annotated[float, Field(ge=0.0)] = 0.2
+    shadow_style: Literal["off", "heightfield", "planar"] = "off"
     output_format: Literal["png", "jpeg", "tiff"] = "png"
     output_bit_depth: Literal[8, 16, 32] = 8
     output_resolution: list[int] | None = None
 
     @model_validator(mode="after")
-    def _validate_format_bitdepth(self) -> "RenderRequest":
+    def _validate_format_bitdepth(self) -> "RenderCommon":
         if self.output_format == "jpeg" and self.output_bit_depth != 8:
             raise ValueError("JPEG supports 8-bit only")
         if self.output_format == "png" and self.output_bit_depth not in (8, 16):
@@ -85,6 +87,16 @@ class RenderRequest(BaseModel):
         if self.output_resolution is not None and len(self.output_resolution) != 2:
             raise ValueError("output_resolution must be [w, h]")
         return self
+
+
+class RenderRequest(RenderCommon):
+    """POST /render body. No additional fields beyond RenderCommon today."""
+
+
+class PolishRequest(RenderCommon):
+    """POST /polish body — adds optional prompt + seed."""
+    prompt: str = ""
+    seed: int | None = None
 
 
 class GoboPreset(BaseModel):
@@ -103,6 +115,9 @@ class PreparedAssets(BaseModel):
     depth_png_url: str
     normals_png_url: str
     mask_png_url: str | None
+    confidence_png_url: str | None = None
+    thumbnail_url: str | None = None
+    source_url: str | None = None
 
 
 class PrepareResponse(BaseModel):
