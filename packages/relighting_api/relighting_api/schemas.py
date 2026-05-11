@@ -128,8 +128,14 @@ class PrepareResponse(BaseModel):
     metadata: dict
 
 
+class Capabilities(BaseModel):
+    polish: bool = False
+    segmenters: list[str] = Field(default_factory=list)
+
+
 class HealthResponse(BaseModel):
     ok: bool
     gpu: bool
     depth_model_loaded: bool
     seg_model_loaded: bool
+    capabilities: Capabilities = Field(default_factory=Capabilities)
