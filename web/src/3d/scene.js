@@ -17,16 +17,6 @@ export function createScene3D(canvas) {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b0b0b);
-  // TODO(task 5): remove after point cloud lands.
-  const cubeGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
-  const cubeMat = new THREE.MeshStandardMaterial({ color: 0x4a77ee });
-  const cube = new THREE.Mesh(cubeGeo, cubeMat);
-  scene.add(cube);
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-  scene.add(ambient);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(1, 2, 1);
-  scene.add(dir);
 
   const perspectiveCamera = new THREE.PerspectiveCamera(
     50,

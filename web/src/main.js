@@ -2,7 +2,7 @@ import {
   newState, newLightNode, newGroupNode, syncLights,
   ADD_LIGHT_ID, lightFromPreset, defaultSceneState,
 } from './lights.js';
-import { mount3D } from './3d/index.js';
+import { mount3D, loadScene3D } from './3d/index.js';
 import {
   prepare, listGobos, render as serverRender,
   listScenes, getScene, createScene, updateScene, renameScene,
@@ -220,6 +220,7 @@ async function applyScene(scene) {
     const canvas = document.getElementById('canvas');
     await initRenderer(canvas);
     await setAssets(state.assetUrls, canvas);
+    await loadScene3D({ assetUrls: state.assetUrls });
     handlesAPI = mountHandles(state, redrawAndSave, onCanvasSelect);
     redraw();
   }
