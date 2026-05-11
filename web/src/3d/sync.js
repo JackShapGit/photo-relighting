@@ -47,6 +47,40 @@ function arrayEq(a, b) {
   return true;
 }
 
+// ─── Scene apply-ops ─────────────────────────────────────────────────────
+
+import { buildLightPrimitive, disposeLightPrimitive } from './light-primitives.js';
+
+/** Apply a list of diff ops to a scene's primitive registry.
+ *
+ * `primitives` is a Map<lightId, primitiveObject> that this helper mutates.
+ * `scene` is the THREE.Scene to add new primitives into.
+ */
+export function applyOps(scene, primitives, ops) {
+  for (const op of ops) {
+    if (op.kind === 'remove') {
+      const p = primitives.get(op.id);
+      if (p) {
+        disposeLightPrimitive(p);
+        primitives.delete(op.id);
+      }
+    } else if (op.kind === 'add') {
+      const p = buildLightPrimitive(op.light);
+      primitives.set(op.light.id, p);
+      scene.add(p.group);
+    } else if (op.kind === 'update') {
+      const p = primitives.get(op.light.id);
+      if (p) p.update(op.light);
+    }
+  }
+}
+
+export function setSelected(primitives, selectedId) {
+  for (const [id, p] of primitives) {
+    p.outline.visible = (id === selectedId);
+  }
+}
+
 // ─── Inline self-test (dev-mode only) ────────────────────────────────────
 
 function _assert(cond, msg) {

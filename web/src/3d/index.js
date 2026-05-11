@@ -1,18 +1,31 @@
 /** 3D viewport entry point. Mount once, hook lifecycle into main.js. */
-import './coords.js';   // dev-mode self-test
-import './sync.js';   // dev-mode self-test
+import * as THREE from 'three';
+import './coords.js';
+import './sync.js';
 import { buildPointCloud, disposePointCloud } from './point-cloud.js';
-import { createScene3D } from './scene.js';
+import { disposeLightPrimitive } from './light-primitives.js';
 import { mountOverlayPanel } from './overlay-panel.js';
+import { createScene3D } from './scene.js';
+import { applyOps, diffLights, setSelected } from './sync.js';
 
 let api = null;
 let currentPointCloud = null;
+const primitives = new Map();
+let prevLights = [];
+let onLightSelected = null;
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
 
-export function mount3D() {
+export function mount3D({ onSelectLight } = {}) {
   if (api) return api;
   const canvas = document.getElementById('canvas3d');
   if (!canvas) return null;
   api = createScene3D(canvas);
+  api.resize();
+  api.start();
+  window.addEventListener('resize', api.resize);
+  onLightSelected = onSelectLight || null;
+
   const overlayEl = document.getElementById('stage3d-overlay');
   if (overlayEl) {
     mountOverlayPanel({
@@ -32,18 +45,49 @@ export function mount3D() {
       },
     });
   }
-  api.resize();
-  api.start();
-  window.addEventListener('resize', api.resize);
+
+  canvas.addEventListener('pointerdown', onCanvasClick);
   return api;
+}
+
+function onCanvasClick(e) {
+  if (e.button !== 0) return;                 // left click only
+  if (!api || primitives.size === 0) return;
+  const canvas = e.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, api.getActiveCamera());
+  // Collect all hit targets across primitives.
+  const hits = [];
+  for (const p of primitives.values()) {
+    hits.push(p.sphere, p.hit);
+  }
+  const intersects = raycaster.intersectObjects(hits, false);
+  if (intersects.length === 0) return;
+  const lightId = intersects[0].object.userData.lightId;
+  if (lightId && onLightSelected) onLightSelected(lightId);
+}
+
+export function syncLightsToScene(lights, selectedId) {
+  if (!api) return;
+  const ops = diffLights(prevLights, lights);
+  applyOps(api.scene, primitives, ops);
+  setSelected(primitives, selectedId);
+  prevLights = lights.map((l) => structuredClone(l));
 }
 
 export async function loadScene3D({ assetUrls }) {
   if (!api) return;
+  // Dispose old cloud + primitives (new scene = different subject).
   if (currentPointCloud) {
     disposePointCloud(currentPointCloud);
     currentPointCloud = null;
   }
+  for (const p of primitives.values()) disposeLightPrimitive(p);
+  primitives.clear();
+  prevLights = [];
+
   if (!assetUrls) return;
   currentPointCloud = await buildPointCloud({
     originalUrl: assetUrls.original_png_url,
@@ -56,6 +100,8 @@ export async function loadScene3D({ assetUrls }) {
 export function dispose3D() {
   if (!api) return;
   if (currentPointCloud) disposePointCloud(currentPointCloud);
+  for (const p of primitives.values()) disposeLightPrimitive(p);
+  primitives.clear();
   api.dispose();
   api = null;
   currentPointCloud = null;

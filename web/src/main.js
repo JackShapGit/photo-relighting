@@ -2,7 +2,7 @@ import {
   newState, newLightNode, newGroupNode, syncLights,
   ADD_LIGHT_ID, lightFromPreset, defaultSceneState,
 } from './lights.js';
-import { mount3D, loadScene3D } from './3d/index.js';
+import { mount3D, loadScene3D, syncLightsToScene } from './3d/index.js';
 import {
   prepare, listGobos, render as serverRender,
   listScenes, getScene, createScene, updateScene, renameScene,
@@ -154,6 +154,7 @@ const onChange = () => {
     handlesAPI = mountHandles(state, redrawAndSave, onCanvasSelect);
     redraw();
   }
+  syncLightsToScene(state.lights, state.selectedId);
   scheduleSave();
 };
 
@@ -169,6 +170,7 @@ function onCanvasSelect(lightId) {
   tree?.render();
   refreshProps();
   handlesAPI?.reposition();
+  syncLightsToScene(state.lights, state.selectedId);
   scheduleSave();
 }
 
@@ -207,6 +209,8 @@ async function applyScene(scene) {
   state.subjectMedianDepth = typeof sm.subject_median_depth === 'number'
     ? sm.subject_median_depth : 0.3;
   syncLights(state);
+  // 3D view picks up lights as soon as they're loaded.
+  syncLightsToScene(state.lights, state.selectedId);
 
   state.width = scene.width;
   state.height = scene.height;
@@ -223,6 +227,7 @@ async function applyScene(scene) {
     await loadScene3D({ assetUrls: state.assetUrls });
     handlesAPI = mountHandles(state, redrawAndSave, onCanvasSelect);
     redraw();
+    syncLightsToScene(state.lights, state.selectedId);   // initial population
   }
   initialized = true;
   setStatus('');
@@ -385,7 +390,15 @@ refreshProps();
 
 (async () => {
   setupPolishUI();   // fire-and-forget; doesn't block scene loading
-  mount3D();
+  mount3D({
+    onSelectLight: (id) => {
+      if (state.selectedId === id) return;
+      state.selectedId = id;
+      tree?.render();
+      refreshProps();
+      handlesAPI?.reposition();
+    },
+  });
 
   try {
     const gobos = await listGobos();
