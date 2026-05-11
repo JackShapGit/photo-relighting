@@ -673,6 +673,15 @@ button.refine-toggle.active {
 
 /* ─── Polish UI ──────────────────────────────────────────────────────────── */
 
+/* The [hidden] HTML attribute must win over the explicit display rules below.
+ * Without this, `display: flex` on .polish-shimmer etc. would override the
+ * UA stylesheet's `[hidden] { display: none }` rule and the elements would
+ * be permanently visible — making it look like polishing is firing on its own. */
+.polish-controls[hidden],
+.polish-toggle[hidden],
+.polish-shimmer[hidden],
+.polish-expand-btn[hidden] { display: none !important; }
+
 .polish-controls {
   display: flex;
   align-items: center;
