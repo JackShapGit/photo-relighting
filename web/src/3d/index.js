@@ -7,16 +7,19 @@ import { disposeLightPrimitive } from './light-primitives.js';
 import { mountOverlayPanel } from './overlay-panel.js';
 import { createScene3D } from './scene.js';
 import { applyOps, diffLights, setSelected } from './sync.js';
+import { createGizmo } from './gizmos.js';
 
 let api = null;
 let currentPointCloud = null;
 const primitives = new Map();
 let prevLights = [];
 let onLightSelected = null;
+let gizmoApi = null;
+let onLightChange = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-export function mount3D({ onSelectLight } = {}) {
+export function mount3D({ onSelectLight, onUpdateLight } = {}) {
   if (api) return api;
   const canvas = document.getElementById('canvas3d');
   if (!canvas) return null;
@@ -25,6 +28,7 @@ export function mount3D({ onSelectLight } = {}) {
   api.start();
   window.addEventListener('resize', api.resize);
   onLightSelected = onSelectLight || null;
+  onLightChange = onUpdateLight || null;
 
   const overlayEl = document.getElementById('stage3d-overlay');
   if (overlayEl) {
@@ -45,6 +49,19 @@ export function mount3D({ onSelectLight } = {}) {
       },
     });
   }
+
+  gizmoApi = createGizmo({
+    camera: api.getActiveCamera(),
+    canvas,
+    orbitControls: api.controls,
+    scene: api.scene,
+    onTranslate: (id, pos) => {
+      if (onLightChange) onLightChange(id, { position: pos });
+    },
+    onRotate: (id, dir) => {
+      if (onLightChange) onLightChange(id, { direction: dir });
+    },
+  });
 
   canvas.addEventListener('pointerdown', onCanvasClick);
   return api;
@@ -75,6 +92,17 @@ export function syncLightsToScene(lights, selectedId) {
   applyOps(api.scene, primitives, ops);
   setSelected(primitives, selectedId);
   prevLights = lights.map((l) => structuredClone(l));
+
+  // Attach gizmo to the selected light's primitive (if any).
+  if (gizmoApi) {
+    const selectedPrim = selectedId ? primitives.get(selectedId) : null;
+    const selectedLight = lights.find((l) => l.id === selectedId);
+    if (selectedPrim && selectedLight) {
+      gizmoApi.attach(selectedPrim, selectedLight.type);
+    } else {
+      gizmoApi.detach();
+    }
+  }
 }
 
 export async function loadScene3D({ assetUrls }) {
@@ -99,6 +127,7 @@ export async function loadScene3D({ assetUrls }) {
 
 export function dispose3D() {
   if (!api) return;
+  if (gizmoApi) { gizmoApi.dispose(); gizmoApi = null; }
   if (currentPointCloud) disposePointCloud(currentPointCloud);
   for (const p of primitives.values()) disposeLightPrimitive(p);
   primitives.clear();

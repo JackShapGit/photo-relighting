@@ -397,6 +397,14 @@ refreshProps();
       tree?.render();
       refreshProps();
       handlesAPI?.reposition();
+      syncLightsToScene(state.lights, state.selectedId);
+    },
+    onUpdateLight: (id, patch) => {
+      const L = state.lights.find((l) => l.id === id);
+      if (!L) return;
+      if (patch.position) L.position = patch.position;
+      if (patch.direction) L.direction = patch.direction;
+      onChange();
     },
   });
 
