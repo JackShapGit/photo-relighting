@@ -11,6 +11,11 @@ import { Z_SCALE, pixelToWorld } from './coords.js';
 
 const MAX_POINTS = 1_000_000;
 
+function srgbToLinearByte(b) {
+  const x = b / 255;
+  return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+}
+
 async function loadImageData(url) {
   const img = new Image();
   img.crossOrigin = 'anonymous';
@@ -60,9 +65,9 @@ export async function buildPointCloud({ originalUrl, depthUrl, zScale = Z_SCALE 
       positions[i * 3 + 0] = x;
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = z;
-      colors[i * 3 + 0] = origPx[idx + 0] / 255;
-      colors[i * 3 + 1] = origPx[idx + 1] / 255;
-      colors[i * 3 + 2] = origPx[idx + 2] / 255;
+      colors[i * 3 + 0] = srgbToLinearByte(origPx[idx + 0]);
+      colors[i * 3 + 1] = srgbToLinearByte(origPx[idx + 1]);
+      colors[i * 3 + 2] = srgbToLinearByte(origPx[idx + 2]);
       i += 1;
     }
   }
