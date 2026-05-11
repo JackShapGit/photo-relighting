@@ -7,17 +7,22 @@
 
 export const Z_SCALE = 1.5;
 
-/** (col, row, depth) → [worldX, worldY, worldZ]. */
+/** (col, row, depth) → [worldX, worldY, worldZ].
+ *
+ * X is flipped because the 3D camera sits at world z = -3 looking toward +Z;
+ * with right-handed coords this puts world +X on the LEFT of the viewport.
+ * Flipping X here keeps image-left visually on viewport-left.
+ */
 export function pixelToWorld(col, row, depth, W, H, zScale = Z_SCALE) {
-  const x = (col / (W - 1)) * 2 - 1;
+  const x = -((col / (W - 1)) * 2 - 1);
   const y = -((row / (H - 1)) * 2 - 1);
   const z = (depth - 0.5) * zScale;
   return [x, y, z];
 }
 
-/** [worldX, worldY] → [col, row] in image pixel coords. */
+/** [worldX, worldY] → [col, row] in image pixel coords. Inverse of pixelToWorld. */
 export function worldToPixel(worldX, worldY, W, H) {
-  const col = ((worldX + 1) / 2) * (W - 1);
+  const col = ((-worldX + 1) / 2) * (W - 1);
   const row = ((-worldY + 1) / 2) * (H - 1);
   return [col, row];
 }
@@ -33,7 +38,7 @@ export function worldToPixel(worldX, worldY, W, H) {
  */
 export function lightToWorld(pos, zScale = Z_SCALE) {
   return [
-    pos[0] * 2 - 1,
+    -(pos[0] * 2 - 1),
     -(pos[1] * 2 - 1),
     (0.5 - pos[2]) * zScale,
   ];
@@ -42,7 +47,7 @@ export function lightToWorld(pos, zScale = Z_SCALE) {
 /** World [x, y, z] → engine light position [engX, engY, engZ]. Inverse of lightToWorld. */
 export function worldToLight(pos, zScale = Z_SCALE) {
   return [
-    (pos[0] + 1) / 2,
+    (1 - pos[0]) / 2,
     (1 - pos[1]) / 2,
     0.5 - pos[2] / zScale,
   ];
@@ -55,7 +60,7 @@ export function worldToLight(pos, zScale = Z_SCALE) {
  * pointing camera-side" semantics after the flip.
  */
 export function directionToWorld(dir, zScale = Z_SCALE) {
-  const wx = dir[0] * 2;
+  const wx = -dir[0] * 2;
   const wy = -dir[1] * 2;
   const wz = -dir[2] * zScale;
   const len = Math.hypot(wx, wy, wz) || 1;
@@ -64,7 +69,7 @@ export function directionToWorld(dir, zScale = Z_SCALE) {
 
 /** World unit vector → engine direction unit vector. Inverse of directionToWorld. */
 export function worldToDirection(worldDir, zScale = Z_SCALE) {
-  const ex = worldDir[0] * 0.5;
+  const ex = -worldDir[0] * 0.5;
   const ey = -worldDir[1] * 0.5;
   const ez = -worldDir[2] / zScale;
   const len = Math.hypot(ex, ey, ez) || 1;
@@ -78,15 +83,16 @@ function _assert(cond, msg) {
 }
 
 if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-  // Top-left pixel of a 100x100 image at depth 0.5 → world (-1, +1, 0).
+  // Top-left pixel of a 100x100 image at depth 0.5 → world (+1, +1, 0).
+  // (X is flipped because the camera at world z=-3 has world +X to its left.)
   const tl = pixelToWorld(0, 0, 0.5, 100, 100);
-  _assert(Math.abs(tl[0] - (-1)) < 1e-6, `top-left x: got ${tl[0]}`);
+  _assert(Math.abs(tl[0] - 1) < 1e-6, `top-left x: got ${tl[0]}`);
   _assert(Math.abs(tl[1] - 1) < 1e-6, `top-left y: got ${tl[1]}`);
   _assert(Math.abs(tl[2]) < 1e-6, `top-left z at depth=0.5: got ${tl[2]}`);
 
-  // Bottom-right pixel at depth 1 → world (+1, -1, +Z_SCALE/2).
+  // Bottom-right pixel at depth 1 → world (-1, -1, +Z_SCALE/2).
   const br = pixelToWorld(99, 99, 1.0, 100, 100);
-  _assert(Math.abs(br[0] - 1) < 1e-6, `bottom-right x: got ${br[0]}`);
+  _assert(Math.abs(br[0] - (-1)) < 1e-6, `bottom-right x: got ${br[0]}`);
   _assert(Math.abs(br[1] - (-1)) < 1e-6, `bottom-right y: got ${br[1]}`);
   _assert(Math.abs(br[2] - Z_SCALE / 2) < 1e-6, `bottom-right z: got ${br[2]}`);
 

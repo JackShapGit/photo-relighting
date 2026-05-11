@@ -106,7 +106,11 @@ window.addEventListener('resize', () => {
 });
 
 const redraw = () => { if (state.sessionId) draw(state); };
-const redrawAndSave = () => { redraw(); scheduleSave(); };
+const redrawAndSave = () => {
+  redraw();
+  syncLightsToScene(state.lights, state.selectedId);
+  scheduleSave();
+};
 
 const refreshProps = () => {
   const c = propsContainer();
