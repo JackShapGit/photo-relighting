@@ -2,6 +2,7 @@ import {
   newState, newLightNode, newGroupNode, syncLights,
   ADD_LIGHT_ID, lightFromPreset, defaultSceneState,
 } from './lights.js';
+import { mount3D } from './3d/index.js';
 import {
   prepare, listGobos, render as serverRender,
   listScenes, getScene, createScene, updateScene, renameScene,
@@ -383,6 +384,7 @@ refreshProps();
 
 (async () => {
   setupPolishUI();   // fire-and-forget; doesn't block scene loading
+  mount3D();
 
   try {
     const gobos = await listGobos();
