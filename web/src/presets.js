@@ -137,6 +137,24 @@ export const PRESETS = [
       softness: 0.10,
     },
   },
+  {
+    id: 'omni',
+    name: 'Omni',
+    icon: '⊙',
+    description: 'Omnidirectional point source, 5000 K',
+    fields: {
+      // Point lights emit in all directions; direction and cone_angle are
+      // ignored by the engine but the wire schema still requires them.
+      type: 'point',
+      position: [0.50, 0.50, 1.3],
+      direction: [0.0, 0.0, -1.0],
+      color_temperature: 5000,
+      intensity: 1.0,
+      falloff: 1.0,
+      cone_angle: 0.5,
+      softness: 0.1,
+    },
+  },
 ];
 
 export function presetById(id) {
