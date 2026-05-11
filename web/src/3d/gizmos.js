@@ -45,8 +45,16 @@ export function createGizmo({ camera, canvas, orbitControls, scene, onTranslate,
   });
 
   function attach(primitive, lightType) {
+    if (!primitive) {
+      detach();
+      return;
+    }
+    // No-op if already attached to the same primitive. Every gizmo drag tick
+    // fires onUpdateLight → onChange → syncLightsToScene, which calls attach
+    // again with the same target. Without this guard the inner gizmo.detach()
+    // cancels the in-flight pointer drag after only a few pixels.
+    if (attachedPrimitive === primitive && attachedLightType === lightType) return;
     detach();
-    if (!primitive) return;
     attachedLightId = primitive.group.userData.lightId;
     attachedPrimitive = primitive;
     attachedLightType = lightType;
