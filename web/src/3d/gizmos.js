@@ -9,6 +9,7 @@
  */
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { worldToDirection, worldToLight } from './coords.js';
 
 export function createGizmo({ camera, canvas, orbitControls, scene, onTranslate, onRotate }) {
   const gizmo = new TransformControls(camera, canvas);
@@ -30,13 +31,16 @@ export function createGizmo({ camera, canvas, orbitControls, scene, onTranslate,
     if (!attachedLightId || !attachedPrimitive) return;
     const g = attachedPrimitive.group;
     if (gizmo.getMode() === 'translate') {
-      onTranslate(attachedLightId, [g.position.x, g.position.y, g.position.z]);
+      const engPos = worldToLight([g.position.x, g.position.y, g.position.z]);
+      onTranslate(attachedLightId, engPos);
     } else if (gizmo.getMode() === 'rotate' && attachedLightType !== 'point') {
-      // Direction comes from the rotated group's local -Y axis (matches the
-      // cone orientation in light-primitives.js). Translate that into the
-      // engine's `direction` convention.
-      const dir = new THREE.Vector3(0, -1, 0).applyQuaternion(g.quaternion).normalize();
-      onRotate(attachedLightId, [dir.x, dir.y, dir.z]);
+      // The cone primitive is built along -Y in light-primitives.js; that's
+      // its "forward" axis. Rotate it by the group's quaternion to get the
+      // current world-space pointing vector, then convert back to engine
+      // direction space.
+      const worldDir = new THREE.Vector3(0, -1, 0).applyQuaternion(g.quaternion).normalize();
+      const engDir = worldToDirection([worldDir.x, worldDir.y, worldDir.z]);
+      onRotate(attachedLightId, engDir);
     }
   });
 
@@ -62,11 +66,15 @@ export function createGizmo({ camera, canvas, orbitControls, scene, onTranslate,
 
   function getMode() { return gizmo.getMode(); }
 
+  function setCamera(newCamera) {
+    gizmo.camera = newCamera;
+  }
+
   function dispose() {
     gizmo.detach();
     scene.remove(gizmo);
     gizmo.dispose();
   }
 
-  return { gizmo, attach, detach, setMode, getMode, dispose };
+  return { gizmo, attach, detach, setMode, getMode, setCamera, dispose };
 }

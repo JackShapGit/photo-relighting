@@ -45,7 +45,10 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
         onPointOpacityChange: (o) => {
           if (currentPointCloud) currentPointCloud.material.opacity = o;
         },
-        onProjectionChange: (mode) => api.setProjection(mode),
+        onProjectionChange: (mode) => {
+          api.setProjection(mode);
+          if (gizmoApi) gizmoApi.setCamera(api.getActiveCamera());
+        },
         onResetCamera: () => api.resetCamera(),
       },
     });
@@ -110,6 +113,8 @@ export function syncLightsToScene(lights, selectedId) {
 
 export async function loadScene3D({ assetUrls }) {
   if (!api) return;
+  // Detach any in-flight gizmo before primitives go away.
+  gizmoApi?.detach();
   // Dispose old cloud + primitives (new scene = different subject).
   if (currentPointCloud) {
     disposePointCloud(currentPointCloud);

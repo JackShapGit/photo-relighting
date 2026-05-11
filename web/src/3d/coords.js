@@ -22,6 +22,47 @@ export function worldToPixel(worldX, worldY, W, H) {
   return [col, row];
 }
 
+/** Engine light position [engX, engY, engZ] → world [x, y, z]. */
+export function lightToWorld(pos, zScale = Z_SCALE) {
+  return [
+    pos[0] * 2 - 1,
+    -(pos[1] * 2 - 1),
+    (pos[2] - 0.5) * zScale,
+  ];
+}
+
+/** World [x, y, z] → engine light position [engX, engY, engZ]. */
+export function worldToLight(pos, zScale = Z_SCALE) {
+  return [
+    (pos[0] + 1) / 2,
+    (1 - pos[1]) / 2,
+    pos[2] / zScale + 0.5,
+  ];
+}
+
+/** Engine direction unit vector → world unit vector.
+ *
+ * Applies the linear part of the position transform (scales x, y, z but no
+ * translation) then renormalizes. This preserves "pointing toward subject"
+ * semantics after the engine↔world remap.
+ */
+export function directionToWorld(dir, zScale = Z_SCALE) {
+  const wx = dir[0] * 2;
+  const wy = -dir[1] * 2;
+  const wz = dir[2] * zScale;
+  const len = Math.hypot(wx, wy, wz) || 1;
+  return [wx / len, wy / len, wz / len];
+}
+
+/** World unit vector → engine direction unit vector. */
+export function worldToDirection(worldDir, zScale = Z_SCALE) {
+  const ex = worldDir[0] * 0.5;
+  const ey = -worldDir[1] * 0.5;
+  const ez = worldDir[2] / zScale;
+  const len = Math.hypot(ex, ey, ez) || 1;
+  return [ex / len, ey / len, ez / len];
+}
+
 // ─── Inline self-test (dev-mode only) ────────────────────────────────────
 
 function _assert(cond, msg) {
@@ -46,4 +87,17 @@ if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
   const cp = worldToPixel(cw[0], cw[1], 101, 101);
   _assert(Math.abs(cp[0] - 50) < 1e-6, `roundtrip col: got ${cp[0]}`);
   _assert(Math.abs(cp[1] - 50) < 1e-6, `roundtrip row: got ${cp[1]}`);
+
+  // Engine ↔ world round-trip on light positions.
+  const lw = lightToWorld([0.5, 0.5, 0.5]);
+  _assert(Math.abs(lw[0]) < 1e-6 && Math.abs(lw[1]) < 1e-6 && Math.abs(lw[2]) < 1e-6,
+          `center light: got ${lw}`);
+  const lr = worldToLight(lw);
+  _assert(Math.abs(lr[0] - 0.5) < 1e-6 && Math.abs(lr[1] - 0.5) < 1e-6 && Math.abs(lr[2] - 0.5) < 1e-6,
+          `light roundtrip: got ${lr}`);
+
+  // Direction round-trip.
+  const dw = directionToWorld([0, 0, -1]);
+  const dr = worldToDirection(dw);
+  _assert(Math.abs(dr[2] - (-1)) < 1e-6, `direction roundtrip z: got ${dr}`);
 }

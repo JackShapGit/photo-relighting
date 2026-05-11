@@ -45,6 +45,7 @@ export function bindHotkeys({ api, gizmoApi }) {
       const cam = api.getActiveCamera();
       const isPersp = cam.isPerspectiveCamera;
       api.setProjection(isPersp ? 'orthographic' : 'perspective');
+      if (gizmoApi) gizmoApi.setCamera(api.getActiveCamera());
       e.preventDefault();
       return;
     }

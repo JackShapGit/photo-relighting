@@ -9,6 +9,7 @@
  *   update(light): apply a new light state (position, direction, color, ...).
  */
 import * as THREE from 'three';
+import { directionToWorld, lightToWorld } from './coords.js';
 
 const SPHERE_RADIUS = 0.05;
 const HIT_RADIUS = SPHERE_RADIUS * 3;
@@ -18,7 +19,7 @@ const CONE_LENGTH = 0.6;
 export function buildLightPrimitive(light) {
   const group = new THREE.Group();
   group.userData.lightId = light.id;
-  group.position.set(...light.position);
+  group.position.set(...lightToWorld(light.position));
 
   const sphereGeo = new THREE.SphereGeometry(SPHERE_RADIUS, 16, 12);
   const sphereMat = new THREE.MeshBasicMaterial({ color: rgbToHex(light.color) });
@@ -37,7 +38,7 @@ export function buildLightPrimitive(light) {
   let arrow = null;
   if (light.type !== 'point') {
     arrow = new THREE.ArrowHelper(
-      new THREE.Vector3(...light.direction).normalize(),
+      new THREE.Vector3(...directionToWorld(light.direction)),
       new THREE.Vector3(0, 0, 0),
       ARROW_LENGTH,
       rgbToHex(light.color),
@@ -59,7 +60,7 @@ export function buildLightPrimitive(light) {
       depthWrite: false,
     });
     cone = new THREE.Mesh(coneGeo, coneMat);
-    orientToDirection(cone, light.direction);
+    orientToDirection(cone, directionToWorld(light.direction));
     group.add(cone);
   }
 
@@ -76,10 +77,10 @@ export function buildLightPrimitive(light) {
 }
 
 function update(prim, light) {
-  prim.group.position.set(...light.position);
+  prim.group.position.set(...lightToWorld(light.position));
   prim.sphere.material.color.set(rgbToHex(light.color));
   if (prim.arrow) {
-    prim.arrow.setDirection(new THREE.Vector3(...light.direction).normalize());
+    prim.arrow.setDirection(new THREE.Vector3(...directionToWorld(light.direction)));
     prim.arrow.setColor(new THREE.Color(rgbToHex(light.color)));
   }
   if (prim.cone) {
@@ -90,7 +91,7 @@ function update(prim, light) {
     g.translate(0, -CONE_LENGTH / 2, 0);
     prim.cone.geometry = g;
     prim.cone.material.color.set(rgbToHex(light.color));
-    orientToDirection(prim.cone, light.direction);
+    orientToDirection(prim.cone, directionToWorld(light.direction));
   }
 }
 
