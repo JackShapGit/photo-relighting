@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -9,106 +9,79 @@
 <body>
   <header>
     <h1>Photo Relighting</h1>
-    <input type="file" id="file" accept="image/*" />
-    <select id="prepare-mode">
-      <option value="interactive" selected>Interactive (1024)</option>
-      <option value="quality">Quality (native)</option>
-    </select>
-    <label class="header-toggle"><input type="checkbox" id="show-anchors" checked /> Anchors</label>
-    <button id="export-btn">Export PNG</button>
+    <input type="text" id="scene-name" placeholder="Untitled scene" />
+    <button id="new-scene-btn" type="button">+ New Scene</button>
+    <button id="scenes-btn" type="button">Scenes</button>
+    <span class="header-status" id="save-status"></span>
+    <span class="header-spacer"></span>
+    <label class="header-toggle">
+      <input type="checkbox" id="show-anchors" checked /> Anchors
+    </label>
+    <button id="refine-mask-btn" type="button" class="refine-toggle">Refine Mask</button>
+    <button id="refine-clear-btn" type="button" hidden>Clear points</button>
+    <button id="export-btn" type="button">Export PNG</button>
+    <div class="polish-controls" data-polish-controls hidden>
+      <div class="polish-toggle" data-polish-toggle hidden>
+        <button type="button" data-polish-toggle-classical class="is-active">Classical</button>
+        <button type="button" data-polish-toggle-polished>Polished</button>
+      </div>
+      <input
+        type="text"
+        placeholder="Polish prompt (optional)"
+        class="polish-prompt"
+        data-polish-prompt
+      />
+      <button type="button" class="polish-btn" data-polish-btn>Polish ▸</button>
+    </div>
+    <label class="theme-toggle" title="Toggle light/dark theme">
+      <input type="checkbox" id="theme-switch" />
+      <span class="theme-track"><span class="theme-thumb"></span></span>
+    </label>
   </header>
 
   <main>
+    <aside id="tree-pane">
+      <div class="pane-header">
+        <h2>Lights</h2>
+        <div class="pane-actions">
+          <button id="add-light-btn" type="button" title="Add light">+ Light</button>
+          <button id="add-group-btn" type="button" title="Add group">+ Group</button>
+        </div>
+      </div>
+      <ul id="tree-root"></ul>
+    </aside>
+
     <section id="stage">
       <div id="canvas-wrap">
         <canvas id="canvas"></canvas>
         <div id="handles"></div>
+        <div id="refine-overlay" hidden></div>
+        <div class="polish-shimmer" data-polish-shimmer hidden>
+          <span class="polish-shimmer-text" data-polish-shimmer-text>Polishing…</span>
+        </div>
+        <button
+          type="button"
+          class="polish-expand-btn"
+          data-polish-expand-btn
+          title="Open polished image"
+          hidden
+        >⤢</button>
       </div>
     </section>
 
-    <aside id="controls">
-      <!-- KEY -->
-      <div class="light-row" data-slot="key">
-        <h3>Key</h3>
-        <label>Type <select class="type">
-          <option value="directional">directional</option>
-          <option value="point">point</option>
-          <option value="spotlight" selected>spotlight</option>
-        </select></label>
-        <label>Intensity <input class="intensity" type="range" min="0" max="3" step="0.01" value="1.2" /></label>
-        <label>Color <input class="color" type="color" value="#ffffff" /></label>
-        <label>Kelvin <input class="kelvin" type="range" min="1500" max="10000" step="50" value="5500" /></label>
-        <label>Cone <input class="cone" type="range" min="0.05" max="1.4" step="0.01" value="0.5" /></label>
-        <label>Softness <input class="softness" type="range" min="0" max="0.5" step="0.01" value="0.1" /></label>
-        <label>Falloff <input class="falloff" type="range" min="0" max="3" step="0.05" value="1.0" /></label>
-        <label>Gobo <select class="gobo">
-          <option value="">none</option>
-        </select></label>
-        <label>Affects <select class="affects">
-          <option value="all">all</option>
-          <option value="subject">subject</option>
-          <option value="background">background</option>
-        </select></label>
-        <label><input type="checkbox" class="enabled" checked /> enabled</label>
-      </div>
-      <!-- FILL -->
-      <div class="light-row" data-slot="fill">
-        <h3>Fill</h3>
-        <label>Type <select class="type">
-          <option value="directional" selected>directional</option>
-          <option value="point">point</option>
-          <option value="spotlight">spotlight</option>
-        </select></label>
-        <label>Intensity <input class="intensity" type="range" min="0" max="3" step="0.01" value="0.5" /></label>
-        <label>Color <input class="color" type="color" value="#ffffff" /></label>
-        <label>Kelvin <input class="kelvin" type="range" min="1500" max="10000" step="50" value="4500" /></label>
-        <label>Cone <input class="cone" type="range" min="0.05" max="1.4" step="0.01" value="0.5" /></label>
-        <label>Softness <input class="softness" type="range" min="0" max="0.5" step="0.01" value="0.1" /></label>
-        <label>Falloff <input class="falloff" type="range" min="0" max="3" step="0.05" value="1.0" /></label>
-        <label>Gobo <select class="gobo">
-          <option value="">none</option>
-        </select></label>
-        <label>Affects <select class="affects">
-          <option value="all">all</option>
-          <option value="subject">subject</option>
-          <option value="background">background</option>
-        </select></label>
-        <label><input type="checkbox" class="enabled" checked /> enabled</label>
-      </div>
-      <!-- RIM -->
-      <div class="light-row" data-slot="rim">
-        <h3>Rim</h3>
-        <label>Type <select class="type">
-          <option value="directional">directional</option>
-          <option value="point">point</option>
-          <option value="spotlight" selected>spotlight</option>
-        </select></label>
-        <label>Intensity <input class="intensity" type="range" min="0" max="3" step="0.01" value="1.0" /></label>
-        <label>Color <input class="color" type="color" value="#ffffff" /></label>
-        <label>Kelvin <input class="kelvin" type="range" min="1500" max="10000" step="50" value="7000" /></label>
-        <label>Cone <input class="cone" type="range" min="0.05" max="1.4" step="0.01" value="0.5" /></label>
-        <label>Softness <input class="softness" type="range" min="0" max="0.5" step="0.01" value="0.1" /></label>
-        <label>Falloff <input class="falloff" type="range" min="0" max="3" step="0.05" value="1.0" /></label>
-        <label>Gobo <select class="gobo">
-          <option value="">none</option>
-        </select></label>
-        <label>Affects <select class="affects">
-          <option value="all">all</option>
-          <option value="subject">subject</option>
-          <option value="background">background</option>
-        </select></label>
-        <label><input type="checkbox" class="enabled" checked /> enabled</label>
-      </div>
-      <hr />
-      <label>Ambient <input id="ambient" type="range" min="0" max="1" step="0.01" value="0.2" /></label>
-      <label>Show <select id="debug-view">
-        <option value="render" selected>Render</option>
-        <option value="depth">Depth</option>
-        <option value="normals">Normals</option>
-        <option value="mask">Mask</option>
-      </select></label>
+    <aside id="props-pane">
+      <div id="props-content"></div>
     </aside>
   </main>
+
+  <div class="polish-lightbox" data-polish-lightbox role="dialog" aria-hidden="true">
+    <button type="button" class="polish-lightbox-close" data-polish-lightbox-close aria-label="Close">×</button>
+    <img class="polish-lightbox-img" data-polish-lightbox-img alt="Polished render" />
+    <div class="polish-lightbox-actions">
+      <button type="button" data-polish-lightbox-download-png>Download PNG</button>
+      <button type="button" data-polish-lightbox-download-jpeg>Download JPEG</button>
+    </div>
+  </div>
 
   <script type="module" src="src/main.js"></script>
 </body>
