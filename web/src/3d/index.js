@@ -138,3 +138,11 @@ export function dispose3D() {
 
 export function getApi3D() { return api; }
 export function getPointCloud() { return currentPointCloud; }
+
+export function setGizmoMode(mode) {
+  if (gizmoApi) gizmoApi.setMode(mode);
+}
+
+export function getGizmoMode() {
+  return gizmoApi ? gizmoApi.getMode() : null;
+}
