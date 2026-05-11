@@ -556,6 +556,32 @@ refineOverlay.addEventListener('pointerdown', async (e) => {
   }
 });
 
+const SPLIT_KEY = 'photo-relight:show-3d';
+const toggle3dBtn = document.getElementById('toggle-3d-btn');
+const stage3dWrap = document.getElementById('stage3d-wrap');
+const stageDivider = document.getElementById('stage-divider');
+
+function apply3dVisibility(visible) {
+  if (!stage3dWrap || !stageDivider) return;
+  stage3dWrap.hidden = !visible;
+  stageDivider.hidden = !visible;
+  toggle3dBtn.textContent = visible ? 'Hide 3D' : 'Show 3D';
+  try { localStorage.setItem(SPLIT_KEY, visible ? '1' : '0'); } catch {}
+  // Allow the 3D renderer to resize to the new canvas dimensions.
+  window.dispatchEvent(new Event('resize'));
+}
+
+if (toggle3dBtn) {
+  toggle3dBtn.addEventListener('click', () => {
+    apply3dVisibility(stage3dWrap?.hidden);
+  });
+  // Restore saved state.
+  try {
+    const saved = localStorage.getItem(SPLIT_KEY);
+    if (saved === '0') apply3dVisibility(false);
+  } catch {}
+}
+
 document.getElementById('export-btn').addEventListener('click', async () => {
   if (!state.sessionId) return;
   const body = {

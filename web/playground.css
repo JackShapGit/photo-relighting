@@ -884,3 +884,5 @@ button.refine-toggle.active {
   font-size: 12px;
   cursor: pointer;
 }
+
+.stage-divider[hidden] { display: none !important; }
