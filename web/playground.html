@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Photo Relighting — Playground</title>
   <link rel="stylesheet" href="playground.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
   <header>
@@ -20,6 +28,7 @@
     <button id="refine-mask-btn" type="button" class="refine-toggle">Refine Mask</button>
     <button id="refine-clear-btn" type="button" hidden>Clear points</button>
     <button id="export-btn" type="button">Export PNG</button>
+    <button id="toggle-3d-btn" type="button" title="Show or hide the 3D viewport">Hide 3D</button>
     <div class="polish-controls" data-polish-controls hidden>
       <div class="polish-toggle" data-polish-toggle hidden>
         <button type="button" data-polish-toggle-classical class="is-active">Classical</button>
@@ -66,6 +75,11 @@
           title="Open polished image"
           hidden
         >⤢</button>
+      </div>
+      <div class="stage-divider" id="stage-divider"></div>
+      <div id="stage3d-wrap">
+        <canvas id="canvas3d"></canvas>
+        <div class="stage3d-overlay" id="stage3d-overlay"></div>
       </div>
     </section>
 
