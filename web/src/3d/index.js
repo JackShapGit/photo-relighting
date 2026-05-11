@@ -2,6 +2,7 @@
 import './coords.js';   // dev-mode self-test
 import { buildPointCloud, disposePointCloud } from './point-cloud.js';
 import { createScene3D } from './scene.js';
+import { mountOverlayPanel } from './overlay-panel.js';
 
 let api = null;
 let currentPointCloud = null;
@@ -11,6 +12,25 @@ export function mount3D() {
   const canvas = document.getElementById('canvas3d');
   if (!canvas) return null;
   api = createScene3D(canvas);
+  const overlayEl = document.getElementById('stage3d-overlay');
+  if (overlayEl) {
+    mountOverlayPanel({
+      rootEl: overlayEl,
+      hooks: {
+        onShowPointsChange: (v) => {
+          if (currentPointCloud) currentPointCloud.points.visible = v;
+        },
+        onPointSizeChange: (s) => {
+          if (currentPointCloud) currentPointCloud.material.size = s;
+        },
+        onPointOpacityChange: (o) => {
+          if (currentPointCloud) currentPointCloud.material.opacity = o;
+        },
+        onProjectionChange: (mode) => api.setProjection(mode),
+        onResetCamera: () => api.resetCamera(),
+      },
+    });
+  }
   api.resize();
   api.start();
   window.addEventListener('resize', api.resize);
