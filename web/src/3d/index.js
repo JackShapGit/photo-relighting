@@ -1,5 +1,6 @@
 /** 3D viewport entry point. Mount once, hook lifecycle into main.js. */
 import { createScene3D } from './scene.js';
+import './coords.js';   // dev-mode self-test
 
 let api = null;
 
