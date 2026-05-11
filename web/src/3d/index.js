@@ -8,6 +8,7 @@ import { mountOverlayPanel } from './overlay-panel.js';
 import { createScene3D } from './scene.js';
 import { applyOps, diffLights, setSelected } from './sync.js';
 import { createGizmo } from './gizmos.js';
+import { bindHotkeys } from './hotkeys.js';
 
 let api = null;
 let currentPointCloud = null;
@@ -62,6 +63,8 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
       if (onLightChange) onLightChange(id, { direction: dir });
     },
   });
+
+  bindHotkeys({ api, gizmoApi });
 
   canvas.addEventListener('pointerdown', onCanvasClick);
   return api;
