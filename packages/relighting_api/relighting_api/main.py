@@ -27,6 +27,22 @@ def create_app(skip_engine: bool = False) -> FastAPI:
     app = FastAPI(title="relighting-api", version="0.1.0")
     app.state.sessions = SessionStore(cache_dir=cache_dir)
     app.state.scenes = SceneStore(db_path=scenes_db)
+
+    # Detect optional capabilities once at startup. Polish requires the
+    # [diffusion] extra + GPU + enough free VRAM; if any check fails the
+    # /polish route returns 501 and the frontend hides the Polish UI.
+    polish_available = False
+    if not skip_engine:
+        try:
+            from relighting_engine.polish.capabilities import is_available
+            polish_available = is_available()
+        except ImportError:
+            polish_available = False
+    app.state.capabilities = {
+        "polish": polish_available,
+        "segmenters": ["rmbg", "sam2"],
+    }
+
     app.state.skip_engine = skip_engine
 
     app.include_router(health_route.router)
