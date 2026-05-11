@@ -22,43 +22,51 @@ export function worldToPixel(worldX, worldY, W, H) {
   return [col, row];
 }
 
-/** Engine light position [engX, engY, engZ] → world [x, y, z]. */
+/** Engine light position [engX, engY, engZ] → world [x, y, z].
+ *
+ * Z is intentionally flipped relative to pixelToWorld: the engine treats
+ * z > 0 as "behind the scene" (its surface normals point +z so back-lit
+ * lights illuminate), but for the 3D viewport users expect a "key" light
+ * with engine z=1.5 to appear in FRONT of the subject (toward the camera),
+ * matching the photographic intuition you see in the 2D render. The flip
+ * makes engine z>0 → world z<0 (close to camera at world z=-3).
+ */
 export function lightToWorld(pos, zScale = Z_SCALE) {
   return [
     pos[0] * 2 - 1,
     -(pos[1] * 2 - 1),
-    (pos[2] - 0.5) * zScale,
+    (0.5 - pos[2]) * zScale,
   ];
 }
 
-/** World [x, y, z] → engine light position [engX, engY, engZ]. */
+/** World [x, y, z] → engine light position [engX, engY, engZ]. Inverse of lightToWorld. */
 export function worldToLight(pos, zScale = Z_SCALE) {
   return [
     (pos[0] + 1) / 2,
     (1 - pos[1]) / 2,
-    pos[2] / zScale + 0.5,
+    0.5 - pos[2] / zScale,
   ];
 }
 
 /** Engine direction unit vector → world unit vector.
  *
- * Applies the linear part of the position transform (scales x, y, z but no
- * translation) then renormalizes. This preserves "pointing toward subject"
- * semantics after the engine↔world remap.
+ * Applies the linear part of the lightToWorld transform (Z flipped) then
+ * renormalizes. This preserves "engine direction.z<0 → world direction
+ * pointing camera-side" semantics after the flip.
  */
 export function directionToWorld(dir, zScale = Z_SCALE) {
   const wx = dir[0] * 2;
   const wy = -dir[1] * 2;
-  const wz = dir[2] * zScale;
+  const wz = -dir[2] * zScale;
   const len = Math.hypot(wx, wy, wz) || 1;
   return [wx / len, wy / len, wz / len];
 }
 
-/** World unit vector → engine direction unit vector. */
+/** World unit vector → engine direction unit vector. Inverse of directionToWorld. */
 export function worldToDirection(worldDir, zScale = Z_SCALE) {
   const ex = worldDir[0] * 0.5;
   const ey = -worldDir[1] * 0.5;
-  const ez = worldDir[2] / zScale;
+  const ez = -worldDir[2] / zScale;
   const len = Math.hypot(ex, ey, ez) || 1;
   return [ex / len, ey / len, ez / len];
 }
