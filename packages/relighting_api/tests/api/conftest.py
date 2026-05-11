@@ -10,8 +10,10 @@ class FakeEngine:
     def __init__(self) -> None:
         self.last_lights: list = []
         self.last_ambient: float = 0.0
+        self.polish_raises: Exception | None = None
 
-    def prepare(self, img: np.ndarray, mode: str = "interactive") -> PreparedImage:
+    def prepare(self, img: np.ndarray, mode: str = "interactive",
+                *, segmenter: str = "rmbg") -> PreparedImage:
         h, w = img.shape[:2]
         return PreparedImage(
             original=img.astype(np.float32),
@@ -20,10 +22,29 @@ class FakeEngine:
             mask=None,
             width=w,
             height=h,
-            metadata={"depth_model": "fake", "seg_model": "fake", "prep_ms": 0},
+            metadata={"depth_model": "fake", "seg_model": segmenter, "prep_ms": 0},
         )
 
-    def render(self, prepared, lights, ambient=0.2, output_resolution=None) -> np.ndarray:
+    def render(
+        self, prepared, lights, ambient=0.2, output_resolution=None,
+        shadow_style="off",
+    ) -> np.ndarray:
         self.last_lights = list(lights)
         self.last_ambient = ambient
+        self.last_shadow_style = shadow_style
         return np.full((prepared.height, prepared.width, 3), 0.5, dtype=np.float32)
+
+    def polish(
+        self, prepared, lights, *, ambient=0.2, shadow_style="off",
+        prompt="", seed=None, output_resolution=None,
+    ) -> np.ndarray:
+        if self.polish_raises is not None:
+            raise self.polish_raises
+        self.last_lights = list(lights)
+        self.last_ambient = ambient
+        self.last_shadow_style = shadow_style
+        self.last_prompt = prompt
+        self.last_seed = seed
+        h = output_resolution[1] if output_resolution else prepared.height
+        w = output_resolution[0] if output_resolution else prepared.width
+        return np.full((h, w, 3), 0.7, dtype=np.float32)

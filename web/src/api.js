@@ -1,7 +1,8 @@
-export async function prepare(file, mode) {
+export async function prepare(file, mode, segmenter = 'rmbg') {
   const fd = new FormData();
   fd.append('image', file);
   fd.append('mode', mode);
+  fd.append('segmenter', segmenter);
   const r = await fetch('/prepare', { method: 'POST', body: fd });
   if (!r.ok) throw new Error(`/prepare: ${r.status} ${await r.text()}`);
   return r.json();
@@ -21,4 +22,125 @@ export async function listGobos() {
   const r = await fetch('/gobos');
   if (!r.ok) throw new Error(`/gobos: ${r.status}`);
   return r.json();
+}
+
+export async function refineMask(sessionId, points) {
+  // points: [{ x, y, label }] in source-image pixel coords.
+  const r = await fetch('/refine_mask', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      session_id: sessionId,
+      points: points.map((p) => [p.x, p.y]),
+      labels: points.map((p) => p.label),
+    }),
+  });
+  if (!r.ok) throw new Error(`/refine_mask: ${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+// ─── Scenes API ──────────────────────────────────────────────────────────
+
+export async function listScenes() {
+  const r = await fetch('/scenes');
+  if (!r.ok) throw new Error(`/scenes: ${r.status}`);
+  return r.json();
+}
+
+export async function getScene(id) {
+  const r = await fetch(`/scenes/${id}`);
+  if (!r.ok) throw new Error(`/scenes/${id}: ${r.status}`);
+  return r.json();
+}
+
+export async function createScene({ name, sessionId, state }) {
+  const r = await fetch('/scenes', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, session_id: sessionId, state }),
+  });
+  if (!r.ok) throw new Error(`/scenes POST: ${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+export async function updateScene(id, state) {
+  const r = await fetch(`/scenes/${id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ state }),
+  });
+  if (!r.ok) throw new Error(`/scenes PUT: ${r.status}`);
+  return r.json();
+}
+
+export async function renameScene(id, name) {
+  const r = await fetch(`/scenes/${id}/name`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!r.ok) throw new Error(`/scenes PATCH name: ${r.status}`);
+  return r.json();
+}
+
+export async function deleteScene(id) {
+  const r = await fetch(`/scenes/${id}`, { method: 'DELETE' });
+  if (!r.ok) throw new Error(`/scenes DELETE: ${r.status}`);
+  return r.json();
+}
+
+export async function exportSceneBlob(id) {
+  const r = await fetch(`/scenes/${id}/export`);
+  if (!r.ok) throw new Error(`/scenes export: ${r.status}`);
+  // Pull the filename out of Content-Disposition so saved files match
+  // the server's "{name}.relight.zip" convention.
+  const cd = r.headers.get('content-disposition') || '';
+  const m = cd.match(/filename="?([^"]+)"?/i);
+  const filename = m ? m[1] : 'scene.relight.zip';
+  return { blob: await r.blob(), filename };
+}
+
+export async function importScene(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await fetch('/scenes/import', { method: 'POST', body: fd });
+  if (!r.ok) throw new Error(`/scenes import: ${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+// ─── Polish API ──────────────────────────────────────────────────────────
+
+export async function getCapabilities() {
+  const r = await fetch('/healthz');
+  if (!r.ok) throw new Error(`/healthz: ${r.status}`);
+  const body = await r.json();
+  return body.capabilities || { polish: false, segmenters: [] };
+}
+
+export async function polishScene({ sessionId, lights, ambient, shadowStyle,
+                                    prompt = '', seed = null,
+                                    outputFormat = 'png', outputBitDepth = 8,
+                                    outputResolution = null }) {
+  const r = await fetch('/polish', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      session_id: sessionId,
+      lights,
+      ambient,
+      shadow_style: shadowStyle,
+      prompt,
+      seed,
+      output_format: outputFormat,
+      output_bit_depth: outputBitDepth,
+      output_resolution: outputResolution,
+    }),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    const err = new Error(`/polish: ${r.status} ${text}`);
+    err.status = r.status;
+    throw err;
+  }
+  return r.blob();
 }
