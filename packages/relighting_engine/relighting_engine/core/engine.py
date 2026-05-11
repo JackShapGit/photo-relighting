@@ -16,7 +16,7 @@ from relighting_engine.depth.depth_anything import DepthAnythingBackend
 from relighting_engine.lighting.models import Light
 from relighting_engine.lighting.shaders import render as shader_render
 from relighting_engine.normals.from_depth import normals_from_depth
-from relighting_engine.polish.iclight import ICLightBackend
+from relighting_engine.polish.backend import PolishBackend
 from relighting_engine.segmentation.rmbg import RMBGBackend
 from relighting_engine.segmentation.sam2 import SAM2Backend
 
@@ -42,7 +42,7 @@ class RelightingEngine:
         # don't pay the import + weight-download cost for the one we don't use.
         self._segmenters: dict[str, object] = {}
         self._gobo_textures: dict[str, torch.Tensor] | None = None
-        self._polisher: ICLightBackend | None = None
+        self._polisher: PolishBackend | None = None
 
     def _get_segmenter(self, name: str):
         if name not in self._segmenters:
@@ -58,10 +58,10 @@ class RelightingEngine:
     # SAM2Backend instance after a successful prepare.
     get_segmenter = _get_segmenter
 
-    def _get_polisher(self) -> ICLightBackend:
-        """Lazy-init the IC-Light backend. First call downloads weights."""
+    def _get_polisher(self) -> PolishBackend:
+        """Lazy-init the polish backend. First call downloads weights."""
         if self._polisher is None:
-            self._polisher = ICLightBackend(device=self.device)
+            self._polisher = PolishBackend(device=self.device)
         return self._polisher
 
     def _gobos(self) -> dict[str, torch.Tensor]:
@@ -169,7 +169,7 @@ class RelightingEngine:
         seed: int | None = None,
         output_resolution: tuple[int, int] | None = None,
     ) -> np.ndarray:
-        """Run the classical render, then refine with IC-Light.
+        """Run the classical render, then refine with SD1.5 img2img.
 
         Returns HxWx3 float32 linear-sRGB in [0,1]. Output dimensions match
         prepared.height × prepared.width unless output_resolution is given.
@@ -179,18 +179,8 @@ class RelightingEngine:
             output_resolution=None, shadow_style=shadow_style,
         )
 
-        h, w = prepared.height, prepared.width
-        if prepared.mask is not None:
-            alpha = prepared.mask.astype(np.float32)
-        else:
-            alpha = np.ones((h, w), dtype=np.float32)
-        fg_rgba = np.concatenate(
-            [prepared.original.astype(np.float32), alpha[..., None]],
-            axis=-1,
-        )
-
         polisher = self._get_polisher()
-        out = polisher.polish(classical, fg_rgba, prompt=prompt, seed=seed)
+        out = polisher.polish(classical, prompt=prompt, seed=seed)
 
         if output_resolution is not None:
             import cv2

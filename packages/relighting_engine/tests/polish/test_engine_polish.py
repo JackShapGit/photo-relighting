@@ -1,6 +1,6 @@
 """Engine-level polish() orchestration test.
 
-Uses a FakeICLightBackend that records its inputs and returns a deterministic
+Uses a FakePolishBackend that records its inputs and returns a deterministic
 image, so the test runs without a GPU or model weights.
 """
 from __future__ import annotations
@@ -12,17 +12,17 @@ from relighting_engine.core.engine import RelightingEngine
 from relighting_engine.core.prepared import PreparedImage
 
 
-class FakeICLightBackend:
+class FakePolishBackend:
     def __init__(self, device: str = "cuda"):
         self.device = device
         self.calls = []
 
-    def polish(self, classical_render, foreground_rgba, prompt, *, seed=None):
+    def polish(self, classical_render, prompt="", *, seed=None, strength=0.25):
         self.calls.append({
             "classical_shape": classical_render.shape,
-            "fg_shape": foreground_rgba.shape,
             "prompt": prompt,
             "seed": seed,
+            "strength": strength,
         })
         h, w = classical_render.shape[:2]
         return np.full((h, w, 3), 0.7, dtype=np.float32)
@@ -55,7 +55,7 @@ def engine_with_fake_polisher(monkeypatch):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
 
     eng = RelightingEngine(device="cpu")
-    fake = FakeICLightBackend(device="cpu")
+    fake = FakePolishBackend(device="cpu")
     monkeypatch.setattr(eng, "_get_polisher", lambda: fake)
     return eng, fake
 
@@ -77,12 +77,11 @@ def test_engine_polish_forwards_prompt_and_seed(engine_with_fake_polisher):
     assert fake.calls[-1]["seed"] == 42
 
 
-def test_engine_polish_uses_mask_for_foreground_alpha(engine_with_fake_polisher):
+def test_engine_polish_passes_classical_render(engine_with_fake_polisher):
     eng, fake = engine_with_fake_polisher
     prepared = _fake_prepared(w=64, h=64)
     eng.polish(prepared, lights=[], ambient=0.2, shadow_style="off")
-    fg_shape = fake.calls[-1]["fg_shape"]
-    assert fg_shape == (64, 64, 4)
+    assert fake.calls[-1]["classical_shape"] == (64, 64, 3)
 
 
 def test_engine_polish_respects_output_resolution(engine_with_fake_polisher):
