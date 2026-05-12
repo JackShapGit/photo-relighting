@@ -29,6 +29,7 @@ export function mountHandles(state, redraw, onSelect) {
     el.className = 'handle';
     el.style.background = slotColor(i);
     el.dataset.id = L.id;
+    el.classList.toggle('handle--reflector', L.type === 'reflector');
     root.appendChild(el);
     return el;
   });

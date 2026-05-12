@@ -893,3 +893,13 @@ button.refine-toggle.active {
 }
 
 .stage-divider[hidden] { display: none !important; }
+
+/* ─── Reflector anchor ─────────────────────────────────────────────────── */
+
+.handle.handle--reflector {
+  background: #6acfff;
+  border: 2px solid var(--handle-ring, #fff);
+  border-radius: 3px;
+  outline: 1px solid rgba(106, 207, 255, 0.4);
+  outline-offset: 2px;
+}
