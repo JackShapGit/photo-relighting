@@ -839,6 +839,13 @@ button.refine-toggle.active {
 
 #stage3d-wrap[hidden] { display: none !important; }
 
+/* When the 3D pane is hidden, center the photo canvas in #stage and let
+ * its explicit width (set by fitCanvasWrap to preserve aspect ratio)
+ * win over flex-grow. Without this, canvas-wrap stretches to fill the
+ * full stage width and the image gets squashed horizontally. */
+#stage.stage--3d-hidden { justify-content: center; }
+#stage.stage--3d-hidden #canvas-wrap { flex: 0 0 auto; }
+
 #canvas3d {
   width: 100%;
   height: 100%;

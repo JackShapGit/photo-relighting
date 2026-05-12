@@ -570,8 +570,12 @@ function apply3dVisibility(visible) {
   stage3dWrap.hidden = !visible;
   stageDivider.hidden = !visible;
   toggle3dBtn.textContent = visible ? 'Hide 3D' : 'Show 3D';
+  // Center the photo canvas (no flex-grow) when 3D is hidden so the
+  // aspect-ratio-preserving width set by fitCanvasWrap actually takes hold.
+  document.getElementById('stage')?.classList.toggle('stage--3d-hidden', !visible);
   try { localStorage.setItem(SPLIT_KEY, visible ? '1' : '0'); } catch {}
-  // Allow the 3D renderer to resize to the new canvas dimensions.
+  // The window resize listener re-runs fitCanvasWrap and the 3D renderer's
+  // resize against the new available width.
   window.dispatchEvent(new Event('resize'));
 }
 
