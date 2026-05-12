@@ -47,3 +47,68 @@ def test_light_validation_rejects_zero_cone_for_spotlight() -> None:
     l = Light(type="spotlight", direction=(0.0, 0.0, 1.0), cone_angle=0.0)
     with pytest.raises(ValueError, match="cone_angle"):
         l.validate()
+
+
+def test_reflector_defaults_validate() -> None:
+    from relighting_engine.lighting.models import Light
+    L = Light(
+        type='reflector',
+        position=(0.5, 0.5, -0.5),
+        direction=(0, 0, -1),
+        color=(1.0, 1.0, 1.0),
+        normal=(0.0, 0.0, 1.0),
+        size=(0.6, 0.4),
+        reflectance=0.7,
+        roughness=0.5,
+    )
+    L.validate()       # should not raise
+
+
+def test_reflector_rejects_negative_size() -> None:
+    from relighting_engine.lighting.models import Light
+    import pytest
+    L = Light(
+        type='reflector',
+        position=(0, 0, 0), direction=(0, 0, -1), color=(1, 1, 1),
+        normal=(0, 0, 1), size=(-0.5, 0.4),
+        reflectance=0.7, roughness=0.5,
+    )
+    with pytest.raises(Exception):
+        L.validate()
+
+
+def test_reflector_rejects_out_of_range_reflectance() -> None:
+    from relighting_engine.lighting.models import Light
+    import pytest
+    L = Light(
+        type='reflector',
+        position=(0, 0, 0), direction=(0, 0, -1), color=(1, 1, 1),
+        normal=(0, 0, 1), size=(0.6, 0.4),
+        reflectance=1.5, roughness=0.5,
+    )
+    with pytest.raises(Exception):
+        L.validate()
+
+
+def test_reflector_zero_normal_rejected() -> None:
+    from relighting_engine.lighting.models import Light
+    import pytest
+    L = Light(
+        type='reflector',
+        position=(0, 0, 0), direction=(0, 0, -1), color=(1, 1, 1),
+        normal=(0, 0, 0), size=(0.6, 0.4),
+        reflectance=0.7, roughness=0.5,
+    )
+    with pytest.raises(Exception):
+        L.validate()
+
+
+def test_regular_light_unaffected_by_reflector_fields() -> None:
+    # Non-reflector types should still validate without setting the new fields.
+    from relighting_engine.lighting.models import Light
+    L = Light(
+        type='spotlight',
+        position=(0.5, 0.3, 1.5), direction=(-0.3, 0.3, -1),
+        color=(1, 1, 1), intensity=1.2,
+    )
+    L.validate()

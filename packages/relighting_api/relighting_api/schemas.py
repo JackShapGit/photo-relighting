@@ -32,7 +32,7 @@ class GoboModel(BaseModel):
 
 
 class LightModel(BaseModel):
-    type: Literal["directional", "point", "spotlight"]
+    type: Literal["directional", "point", "spotlight", "reflector"]
     position: list[float] = Field(default_factory=lambda: [0.0, 0.0, -1.0])
     direction: list[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0])
     color: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0])
@@ -45,6 +45,10 @@ class LightModel(BaseModel):
     gobo: GoboModel | None = None
     affects: Literal["all", "subject", "background"] = "all"
     enabled: bool = True
+    normal: list[float] = Field(default_factory=lambda: [0.0, 0.0, -1.0])
+    size: list[float] = Field(default_factory=lambda: [0.6, 0.4])
+    reflectance: Annotated[float, Field(ge=0.0, le=1.0)] = 0.7
+    roughness: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
 
     def to_engine(self) -> Light:
         l = Light(
@@ -61,6 +65,10 @@ class LightModel(BaseModel):
             gobo=self.gobo.to_engine() if self.gobo else None,
             affects=self.affects,
             enabled=self.enabled,
+            normal=(self.normal[0], self.normal[1], self.normal[2]),
+            size=(self.size[0], self.size[1]),
+            reflectance=self.reflectance,
+            roughness=self.roughness,
         )
         l.validate()
         return l

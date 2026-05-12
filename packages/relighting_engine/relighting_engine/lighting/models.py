@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from math import isfinite
 from typing import Any, Literal
 
-LightType = Literal["directional", "point", "spotlight"]
+LightType = Literal["directional", "point", "spotlight", "reflector"]
 Affects = Literal["all", "subject", "background"]
 
 
@@ -41,7 +41,7 @@ class Gobo:
 
 @dataclass
 class Light:
-    type: LightType
+    type: Literal['directional', 'point', 'spotlight', 'reflector']
     position: tuple[float, float, float] = (0.0, 0.0, -1.0)
     direction: tuple[float, float, float] = (0.0, 0.0, 1.0)
     color: tuple[float, float, float] = (1.0, 1.0, 1.0)
@@ -55,8 +55,14 @@ class Light:
     affects: Affects = "all"
     enabled: bool = True
 
+    # Reflector-only fields (ignored for non-reflector types).
+    normal: tuple[float, float, float] = (0.0, 0.0, -1.0)
+    size: tuple[float, float] = (0.6, 0.4)
+    reflectance: float = 0.7
+    roughness: float = 0.5
+
     def validate(self) -> None:
-        if self.type not in ("directional", "point", "spotlight"):
+        if self.type not in ("directional", "point", "spotlight", "reflector"):
             raise ValueError(f"unknown light type {self.type}")
         if not isfinite(self.intensity) or self.intensity < 0:
             raise ValueError("intensity must be non-negative finite")
@@ -68,6 +74,16 @@ class Light:
             raise ValueError("cone_angle must be positive for spotlight")
         if any(not isfinite(c) or c < 0 for c in self.color):
             raise ValueError("color components must be non-negative finite")
+        if self.type == 'reflector':
+            nx, ny, nz = self.normal
+            if nx * nx + ny * ny + nz * nz < 1e-9:
+                raise ValueError('reflector normal must be non-zero')
+            if self.size[0] <= 0 or self.size[1] <= 0:
+                raise ValueError('reflector size components must be positive')
+            if not (0.0 <= self.reflectance <= 1.0):
+                raise ValueError('reflector reflectance must be in [0, 1]')
+            if not (0.0 <= self.roughness <= 1.0):
+                raise ValueError('reflector roughness must be in [0, 1]')
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = asdict(self)
@@ -94,4 +110,8 @@ class Light:
             gobo=gobo,
             affects=d.get("affects", "all"),
             enabled=bool(d.get("enabled", True)),
+            normal=tuple(d.get('normal', (0.0, 0.0, -1.0))),
+            size=tuple(d.get('size', (0.6, 0.4))),
+            reflectance=float(d.get('reflectance', 0.7)),
+            roughness=float(d.get('roughness', 0.5)),
         )
