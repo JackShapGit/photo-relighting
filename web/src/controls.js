@@ -162,6 +162,10 @@ function renderSceneProps(state, container, redraw) {
 }
 
 function renderLightProps(L, slotIdx, container, redraw) {
+  if (L.type === 'reflector') {
+    renderReflectorProps(L, slotIdx, container, redraw);
+    return;
+  }
   const goboOptions = ['<option value="">none</option>']
     .concat(goboPresets.map((g) =>
       `<option value="${g.gobo_id}">${escapeHtml(g.name)}</option>`))
@@ -236,6 +240,49 @@ function renderLightProps(L, slotIdx, container, redraw) {
       L.gobo = null;
     }
   });
+}
+
+function renderReflectorProps(L, slotIdx, container, redraw) {
+  container.innerHTML = `
+    <div class="props-header">
+      <span class="slot-dot" style="background: ${slotColor(slotIdx)}"></span>
+      <h2 class="props-name">${escapeHtml(L.name)}</h2>
+    </div>
+    <label>Enabled <input type="checkbox" class="r-enabled" ${L.enabled === false ? '' : 'checked'} /></label>
+    <label>Affects
+      <select class="r-affects">
+        <option value="all"        ${L.affects === 'all'        ? 'selected' : ''}>all</option>
+        <option value="subject"    ${L.affects === 'subject'    ? 'selected' : ''}>subject</option>
+        <option value="background" ${L.affects === 'background' ? 'selected' : ''}>background</option>
+      </select>
+    </label>
+    <label>Width       <input type="range" class="r-size0" min="0.1" max="2.0" step="0.05" value="${L.size?.[0] ?? 0.6}" /></label>
+    <label>Height      <input type="range" class="r-size1" min="0.1" max="2.0" step="0.05" value="${L.size?.[1] ?? 0.4}" /></label>
+    <label>Color       <input type="color" class="r-color" value="${linearToHex(L.color)}" /></label>
+    <label>Reflectance <input type="range" class="r-reflectance" min="0" max="1" step="0.05" value="${L.reflectance ?? 0.7}" /></label>
+    <label>Glossy ←→ Matte <input type="range" class="r-roughness" min="0" max="1" step="0.05" value="${L.roughness ?? 0.5}" /></label>
+  `;
+
+  const $ = (sel) => container.querySelector(sel);
+  const bind = (sel, fn) =>
+    $(sel).addEventListener('input', (e) => { fn(e.target); redraw(); });
+
+  bind('.r-enabled',     (t) => { L.enabled = t.checked; });
+  bind('.r-affects',     (t) => { L.affects = t.value; });
+  bind('.r-size0',       (t) => { L.size = [parseFloat(t.value), L.size?.[1] ?? 0.4]; });
+  bind('.r-size1',       (t) => { L.size = [L.size?.[0] ?? 0.6, parseFloat(t.value)]; });
+  bind('.r-color',       (t) => { L.color = hexToLinearRGB(t.value); });
+  bind('.r-reflectance', (t) => { L.reflectance = parseFloat(t.value); });
+  bind('.r-roughness',   (t) => { L.roughness = parseFloat(t.value); });
+
+  const nameEl = $('.props-name');
+  if (nameEl) {
+    nameEl.contentEditable = 'true';
+    nameEl.addEventListener('blur', () => {
+      L.name = nameEl.textContent.trim() || 'Reflector';
+      redraw();
+    });
+  }
 }
 
 function escapeHtml(s) {
