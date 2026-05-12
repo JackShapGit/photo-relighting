@@ -15,6 +15,10 @@ import * as THREE from 'three';
 import { Z_SCALE, pixelToWorld } from './coords.js';
 
 const MAX_POINTS = 1_000_000;
+// Cap the mirror canvas's long edge so per-frame texture uploads stay cheap.
+// The point cloud is stride-downsampled to ~1M points anyway — a higher-
+// resolution texture wastes GPU bandwidth without adding visible detail.
+const MAX_MIRROR_DIM = 1024;
 
 async function loadImageData(url) {
   const img = new Image();
@@ -39,7 +43,10 @@ const VERT_SRC = `
   void main() {
     v_uv = a_uv;
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = u_size * (300.0 / max(0.1, -mv.z));
+    // u_size is in world-space units (matches PointsMaterial.size). The
+    // 1000 multiplier roughly accounts for a typical viewport height in
+    // pixels so a u_size of ~0.005 gives 1–2 px points at unit distance.
+    gl_PointSize = u_size * 1000.0 / max(0.1, -mv.z);
     gl_Position = projectionMatrix * mv;
   }
 `;
@@ -102,17 +109,21 @@ export async function buildPointCloud({ originalUrl, depthUrl, sourceCanvas2D, z
 
   // Offscreen 2D canvas we mirror into right after each classical render.
   // Reading from the live WebGL canvas directly is unreliable because its
-  // drawing buffer may be cleared after compositing.
+  // drawing buffer may be cleared after compositing. Capped to MAX_MIRROR_DIM
+  // on the long edge to keep per-frame texture uploads cheap.
+  const mirrorScale = Math.min(1, MAX_MIRROR_DIM / Math.max(W, H));
+  const mirrorW = Math.max(1, Math.round(W * mirrorScale));
+  const mirrorH = Math.max(1, Math.round(H * mirrorScale));
   const mirror = document.createElement('canvas');
-  mirror.width = W;
-  mirror.height = H;
+  mirror.width = mirrorW;
+  mirror.height = mirrorH;
   const mirrorCtx = mirror.getContext('2d');
   // Seed with the original image so the first 3D frame has something to
   // show before any classical render fires.
   const seedImg = document.createElement('canvas');
   seedImg.width = W; seedImg.height = H;
   seedImg.getContext('2d').putImageData(origData, 0, 0);
-  mirrorCtx.drawImage(seedImg, 0, 0);
+  mirrorCtx.drawImage(seedImg, 0, 0, mirrorW, mirrorH);
 
   const texture = new THREE.CanvasTexture(mirror);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -122,7 +133,7 @@ export async function buildPointCloud({ originalUrl, depthUrl, sourceCanvas2D, z
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       u_map:     { value: texture },
-      u_size:    { value: 2.0 },
+      u_size:    { value: 0.005 },  // world-space size; matches old PointsMaterial.size
       u_opacity: { value: 0.8 },
     },
     vertexShader: VERT_SRC,
@@ -135,7 +146,7 @@ export async function buildPointCloud({ originalUrl, depthUrl, sourceCanvas2D, z
     // then flag the texture for re-upload on the next 3D frame.
     if (!canvas) return;
     try {
-      mirrorCtx.drawImage(canvas, 0, 0, W, H);
+      mirrorCtx.drawImage(canvas, 0, 0, mirrorW, mirrorH);
       texture.needsUpdate = true;
     } catch (e) {
       // drawImage can throw if the source canvas is tainted (cross-origin)

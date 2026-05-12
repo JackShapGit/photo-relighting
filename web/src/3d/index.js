@@ -40,10 +40,11 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
           if (currentPointCloud) currentPointCloud.points.visible = v;
         },
         onPointSizeChange: (s) => {
-          // Slider gives world-space size [0.002, 0.012] — remap to a
-          // larger gl_PointSize multiplier used by the custom shader.
+          // Slider gives world-space size [0.002, 0.012] which feeds the
+          // shader's u_size uniform directly (matches the original
+          // PointsMaterial.size scaling).
           if (currentPointCloud) {
-            currentPointCloud.material.uniforms.u_size.value = s * 400;
+            currentPointCloud.material.uniforms.u_size.value = s;
           }
         },
         onPointOpacityChange: (o) => {
