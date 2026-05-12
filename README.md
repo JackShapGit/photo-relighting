@@ -35,6 +35,58 @@ python scripts/download_models.py
 
 Open <http://localhost:8000/web/playground.html>.
 
+## Playground UI
+
+The playground is a 3-pane layout:
+
+- **Left** — hierarchical tree of lights and groups. Right-click any row for
+  Add Light / Add Group / Rename / Clone / Delete. Drag rows to reorder; drop
+  on a group's middle to nest, drop on its top/bottom edge to insert as a
+  sibling. The "Drop here to move to root" pile at the bottom moves things
+  out of all groups.
+- **Centre** — the canvas + draggable anchors. Click an anchor to select the
+  matching light (a dashed ring spins around the selected anchor). Drag the
+  anchor to move; shift-drag tilts direction; mouse-wheel adjusts depth.
+- **Right** — context-sensitive properties. Selecting **Scene** (top of the
+  tree) reveals **Ambient** and **Show** (Render / Depth / Normals / Mask).
+  Selecting a light reveals its full controls (type, intensity, colour,
+  Kelvin, cone, softness, falloff, gobo, affects, enabled).
+
+### Scenes (auto-saved + portable)
+
+Every edit is auto-saved (debounced 500 ms) to a SQLite DB at
+`cache/scenes.db`. A **scene** = name + lighting tree + a pointer to the
+prepared image session. The header has:
+
+- **+ New Scene** — popup that takes a name and an image, runs `/prepare`,
+  creates the scene row.
+- **Scenes** — modal listing every saved scene with thumbnail + last-edit
+  date. Click a row to load. Per-row **Export** downloads a portable
+  `.relight.zip`; the toolbar **Import** accepts that zip on the receiving
+  end (the image is re-prepared so it's engine-version-agnostic).
+- **Scene name** — click to rename inline; persisted on blur or Enter.
+
+### Themes & shortcuts
+
+- **Theme toggle** in the top-right header (light/dark, persisted in
+  localStorage).
+- **F2** rename selected node, **Delete** delete (with confirm), **Ctrl/Cmd-D**
+  clone.
+
+### Polish (optional IC-Light diffusion pass)
+
+After dialing in lights with the classical renderer, click **Polish ▸** in the
+header to run an IC-Light diffusion refinement (5–15 s) on top of the current
+scene. A Classical ⇄ Polished toggle appears once the result is ready; the
+expand icon on the canvas opens a fullscreen lightbox with PNG/JPEG download.
+Any light change invalidates the polish. The optional text field next to the
+button accepts a freeform prompt (e.g. *"warm golden hour"*) to steer the look.
+
+Polish requires `pip install -e packages/relighting_engine[diffusion]` and a
+GPU with ≥8 GB free VRAM. First run downloads ~6 GB of weights. The Polish
+UI is hidden when these aren't available (gated on `/healthz`'s
+`capabilities.polish` field).
+
 ## Tests
 
 ```powershell
