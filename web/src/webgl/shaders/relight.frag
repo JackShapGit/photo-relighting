@@ -39,6 +39,18 @@ uniform int   u_l_goboInvert[MAX_LIGHTS];
 
 uniform int u_lightCount;
 
+#define MAX_REFLECTORS 4
+
+uniform int   u_reflectorCount;
+uniform vec3  u_r_position[MAX_REFLECTORS];
+uniform vec3  u_r_normal[MAX_REFLECTORS];
+uniform vec3  u_r_emission[MAX_REFLECTORS];
+uniform vec3  u_r_dominant_dir[MAX_REFLECTORS];
+uniform vec2  u_r_size[MAX_REFLECTORS];
+uniform float u_r_roughness[MAX_REFLECTORS];
+uniform int   u_r_enabled[MAX_REFLECTORS];
+uniform int   u_r_affects[MAX_REFLECTORS];
+
 float saturate1(float x) { return clamp(x, 0.0, 1.0); }
 
 vec2 ortho_uv(vec3 P, vec3 d_in) {
@@ -201,6 +213,46 @@ void main() {
 
     float shadow = shadow_factor(P, Lvec, maskV);
     total += original * u_l_color[i] * u_l_intensity[i] * diff * atten * cone * gobo * maskW * confV * shadow;
+  }
+
+  for (int i = 0; i < MAX_REFLECTORS; i++) {
+    if (i >= u_reflectorCount) break;
+    if (u_r_enabled[i] == 0) continue;
+
+    // affects gating: 0=all, 1=subject, 2=background.
+    float maskAffect = 1.0;
+    if (u_r_affects[i] == 1) maskAffect = maskV;
+    else if (u_r_affects[i] == 2) maskAffect = 1.0 - maskV;
+    if (maskAffect <= 0.0) continue;
+
+    vec3  R_pos   = u_r_position[i];
+    vec3  R_norm  = u_r_normal[i];
+    vec3  R_emit  = u_r_emission[i];
+    vec3  R_refl  = u_r_dominant_dir[i];
+    float rough   = u_r_roughness[i];
+    vec2  R_size  = u_r_size[i];
+
+    vec3 Lvec = R_pos - P;
+    float dist = length(Lvec) + 1e-6;
+    Lvec /= dist;
+
+    float facing = max(0.0, dot(R_norm, -Lvec));
+    if (facing <= 0.0) continue;
+
+    float area  = R_size.x * R_size.y;
+    float atten = area / (dist * dist + 1.0);
+
+    float diffuse_w = rough;
+    float ndotl     = max(0.0, dot(N, Lvec));
+    vec3  diffuse_c = R_emit * ndotl * diffuse_w * facing * atten;
+
+    float glossy_w     = 1.0 - rough;
+    float lobe_sharp   = mix(2.0, 50.0, 1.0 - rough);
+    float align        = max(0.0, dot(Lvec, R_refl));
+    float lobe         = pow(align, lobe_sharp);
+    vec3  glossy_c     = R_emit * lobe * glossy_w * facing * atten;
+
+    total += maskAffect * (diffuse_c + glossy_c);
   }
 
   total = clamp(total, vec3(0.0), vec3(1.0));

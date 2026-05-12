@@ -2,6 +2,8 @@
 // Loads textures from /prepare URLs, runs a fullscreen quad through relight.frag.
 // Public API: init(canvas), setAssets(urls), setLights(lights, ambient), draw().
 
+import { computeReflectorEmission } from './reflector-emission.js';
+
 let gl, program, vao, locs;
 let texOriginal, texDepth, texNormals, texMask, texConfidence;
 const goboTextures = new Map();   // gobo_id -> WebGLTexture
@@ -78,6 +80,16 @@ export async function init(canvas) {
     // light array uniforms — per-field arrays of length 8
     ...buildLightUniformLocs(),
     u_goboTex: [...Array(8)].map((_, i) => gl.getUniformLocation(program, `u_goboTex[${i}]`)),
+    // reflector uniforms
+    u_reflectorCount:  gl.getUniformLocation(program, 'u_reflectorCount'),
+    u_r_position:      gl.getUniformLocation(program, 'u_r_position'),
+    u_r_normal:        gl.getUniformLocation(program, 'u_r_normal'),
+    u_r_emission:      gl.getUniformLocation(program, 'u_r_emission'),
+    u_r_dominant_dir:  gl.getUniformLocation(program, 'u_r_dominant_dir'),
+    u_r_size:          gl.getUniformLocation(program, 'u_r_size'),
+    u_r_roughness:     gl.getUniformLocation(program, 'u_r_roughness'),
+    u_r_enabled:       gl.getUniformLocation(program, 'u_r_enabled'),
+    u_r_affects:       gl.getUniformLocation(program, 'u_r_affects'),
   };
 }
 
@@ -181,8 +193,14 @@ export function draw(state) {
   gl.uniform1f(locs.u_ambient, state.ambient);
   gl.uniform1i(locs.u_debugView, encodeDebugView(state.debugView));
 
-  state.gelResolved = state.lights.map(L => ({ ...L, color: resolveColor(L) }));
-  uploadLights(state.lights, state.gelResolved || state.lights);
+  const allLights = state.lights || [];
+  const reflectors = allLights.filter((L) => L.type === 'reflector');
+  const emitters   = allLights.filter((L) => L.type !== 'reflector');
+  const reflEmission = computeReflectorEmission(allLights);
+
+  state.gelResolved = emitters.map(L => ({ ...L, color: resolveColor(L) }));
+  uploadLights(emitters, state.gelResolved || emitters);
+  uploadReflectors(reflectors, reflEmission);
 
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
@@ -256,4 +274,49 @@ function uploadLights(lights, lightsResolved) {
   gl.uniform1fv(locs.goboRotation, goboRotation);
   gl.uniform2fv(locs.goboOffset, goboOffset);
   gl.uniform1iv(locs.goboInvert, goboInvert);
+}
+
+function uploadReflectors(reflectors, reflEmission) {
+  const MAX_REFLECTORS = 4;
+  const rCount = Math.min(reflectors.length, MAX_REFLECTORS);
+  gl.uniform1i(locs.u_reflectorCount, rCount);
+
+  const flatVec3 = (arr) => {
+    const out = new Float32Array(MAX_REFLECTORS * 3);
+    for (let i = 0; i < rCount; i++) {
+      out[i*3+0] = arr[i][0]; out[i*3+1] = arr[i][1]; out[i*3+2] = arr[i][2];
+    }
+    return out;
+  };
+  const flatVec2 = (arr) => {
+    const out = new Float32Array(MAX_REFLECTORS * 2);
+    for (let i = 0; i < rCount; i++) {
+      out[i*2+0] = arr[i][0]; out[i*2+1] = arr[i][1];
+    }
+    return out;
+  };
+
+  const positions = reflectors.map((r) => r.position || [0,0,0]);
+  const normals   = reflectors.map((r) => r.normal   || [0,0,1]);
+  const emissions = reflEmission.map((r) => r.emission || [0,0,0]);
+  const domDirs   = reflEmission.map((r) => r.dominantDir || [0,0,1]);
+  const sizes     = reflectors.map((r) => r.size || [0.6, 0.4]);
+  const rough     = new Float32Array(MAX_REFLECTORS);
+  const enabled   = new Int32Array(MAX_REFLECTORS);
+  const affects   = new Int32Array(MAX_REFLECTORS);
+  for (let i = 0; i < rCount; i++) {
+    rough[i]   = reflectors[i].roughness ?? 0.5;
+    enabled[i] = reflectors[i].enabled === false ? 0 : 1;
+    affects[i] = reflectors[i].affects === 'subject' ? 1
+              : reflectors[i].affects === 'background' ? 2 : 0;
+  }
+
+  gl.uniform3fv(locs.u_r_position,     flatVec3(positions));
+  gl.uniform3fv(locs.u_r_normal,       flatVec3(normals));
+  gl.uniform3fv(locs.u_r_emission,     flatVec3(emissions));
+  gl.uniform3fv(locs.u_r_dominant_dir, flatVec3(domDirs));
+  gl.uniform2fv(locs.u_r_size,         flatVec2(sizes));
+  gl.uniform1fv(locs.u_r_roughness,    rough);
+  gl.uniform1iv(locs.u_r_enabled,      enabled);
+  gl.uniform1iv(locs.u_r_affects,      affects);
 }
