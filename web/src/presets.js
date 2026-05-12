@@ -155,6 +155,26 @@ export const PRESETS = [
       softness: 0.1,
     },
   },
+  {
+    id: 'reflector',
+    name: 'Reflector',
+    icon: '▭',
+    description: 'Bounce card — silver/white, 5000 K',
+    fields: {
+      type: 'reflector',
+      position: [0.25, 0.55, -0.4],
+      direction: [0, 0, -1],
+      color_temperature: 5000,
+      intensity: 1.0,
+      falloff: 1.0,
+      cone_angle: 0.5,
+      softness: 0.1,
+      normal: [0.5, 0.0, 1.0],
+      size: [0.6, 0.4],
+      reflectance: 0.7,
+      roughness: 0.5,
+    },
+  },
 ];
 
 export function presetById(id) {

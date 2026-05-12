@@ -32,6 +32,10 @@ export function lightFromPreset(preset) {
     falloff: preset.fields.falloff ?? 1.0,
     cone_angle: preset.fields.cone_angle ?? 0.5,
     softness: preset.fields.softness ?? 0.1,
+    normal:       preset.fields.normal      ? preset.fields.normal.slice()      : [0, 0, -1],
+    size:         preset.fields.size        ? preset.fields.size.slice()        : [0.6, 0.4],
+    reflectance:  preset.fields.reflectance ?? 0.7,
+    roughness:    preset.fields.roughness   ?? 0.5,
     gobo: null,
     affects: 'all',
   };
