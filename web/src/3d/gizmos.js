@@ -34,13 +34,20 @@ export function createGizmo({ camera, canvas, orbitControls, scene, onTranslate,
       const engPos = worldToLight([g.position.x, g.position.y, g.position.z]);
       onTranslate(attachedLightId, engPos);
     } else if (gizmo.getMode() === 'rotate' && attachedLightType !== 'point') {
-      // The cone primitive is built along -Y in light-primitives.js; that's
-      // its "forward" axis. Rotate it by the group's quaternion to get the
-      // current world-space pointing vector, then convert back to engine
-      // direction space.
-      const worldDir = new THREE.Vector3(0, -1, 0).applyQuaternion(g.quaternion).normalize();
-      const engDir = worldToDirection([worldDir.x, worldDir.y, worldDir.z]);
-      onRotate(attachedLightId, engDir);
+      if (attachedLightType === 'reflector') {
+        // Reflector plane's "front" is local +Z (from setFromUnitVectors above).
+        const worldDir = new THREE.Vector3(0, 0, 1).applyQuaternion(g.quaternion).normalize();
+        const engNormal = worldToDirection([worldDir.x, worldDir.y, worldDir.z]);
+        onRotate(attachedLightId, engNormal, 'normal');
+      } else {
+        // The cone primitive is built along -Y in light-primitives.js; that's
+        // its "forward" axis. Rotate it by the group's quaternion to get the
+        // current world-space pointing vector, then convert back to engine
+        // direction space.
+        const worldDir = new THREE.Vector3(0, -1, 0).applyQuaternion(g.quaternion).normalize();
+        const engDir = worldToDirection([worldDir.x, worldDir.y, worldDir.z]);
+        onRotate(attachedLightId, engDir, 'direction');
+      }
     }
   });
 

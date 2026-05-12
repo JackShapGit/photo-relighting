@@ -69,8 +69,8 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
     onTranslate: (id, pos) => {
       if (onLightChange) onLightChange(id, { position: pos });
     },
-    onRotate: (id, dir) => {
-      if (onLightChange) onLightChange(id, { direction: dir });
+    onRotate: (id, vec, field) => {
+      if (onLightChange) onLightChange(id, { [field]: vec });
     },
   });
 

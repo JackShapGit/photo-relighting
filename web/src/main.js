@@ -416,8 +416,9 @@ refreshProps();
     onUpdateLight: (id, patch) => {
       const L = state.lights.find((l) => l.id === id);
       if (!L) return;
-      if (patch.position) L.position = patch.position;
+      if (patch.position)  L.position  = patch.position;
       if (patch.direction) L.direction = patch.direction;
+      if (patch.normal)    L.normal    = patch.normal;
       onChange();
     },
   });
