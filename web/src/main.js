@@ -2,7 +2,9 @@ import {
   newState, newLightNode, newGroupNode, syncLights,
   ADD_LIGHT_ID, lightFromPreset, defaultSceneState,
 } from './lights.js';
-import { mount3D, loadScene3D, syncLightsToScene } from './3d/index.js';
+import {
+  loadScene3D, mount3D, refreshPointCloudColor, syncLightsToScene,
+} from './3d/index.js';
 import {
   prepare, listGobos, render as serverRender,
   listScenes, getScene, createScene, updateScene, renameScene,
@@ -105,7 +107,15 @@ window.addEventListener('resize', () => {
   if (state.sessionId) document.dispatchEvent(new Event('relight:redraw'));
 });
 
-const redraw = () => { if (state.sessionId) draw(state); };
+const redraw = () => {
+  if (!state.sessionId) return;
+  draw(state);
+  // Mirror the freshly-rendered 2D canvas into the 3D point cloud's texture
+  // so the cloud reflects the current lighting. Done synchronously here
+  // (before the browser composites) because WebGL drawing buffers may be
+  // cleared after the next compositor cycle when preserveDrawingBuffer=false.
+  refreshPointCloudColor();
+};
 const redrawAndSave = () => {
   redraw();
   syncLightsToScene(state.lights, state.selectedId);

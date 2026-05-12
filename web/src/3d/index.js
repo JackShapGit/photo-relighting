@@ -40,10 +40,16 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
           if (currentPointCloud) currentPointCloud.points.visible = v;
         },
         onPointSizeChange: (s) => {
-          if (currentPointCloud) currentPointCloud.material.size = s;
+          // Slider gives world-space size [0.002, 0.012] — remap to a
+          // larger gl_PointSize multiplier used by the custom shader.
+          if (currentPointCloud) {
+            currentPointCloud.material.uniforms.u_size.value = s * 400;
+          }
         },
         onPointOpacityChange: (o) => {
-          if (currentPointCloud) currentPointCloud.material.opacity = o;
+          if (currentPointCloud) {
+            currentPointCloud.material.uniforms.u_opacity.value = o;
+          }
         },
         onProjectionChange: (mode) => {
           api.setProjection(mode);
@@ -128,9 +134,19 @@ export async function loadScene3D({ assetUrls }) {
   currentPointCloud = await buildPointCloud({
     originalUrl: assetUrls.original_png_url,
     depthUrl: assetUrls.depth_png_url,
+    sourceCanvas2D: document.getElementById('canvas'),
   });
   api.scene.add(currentPointCloud.points);
   api.resetCamera();
+}
+
+/** Mirror the live 2D-render canvas into the point cloud's texture.
+ * Call this immediately after every classical render so the 3D pane
+ * reflects whatever the 2D pane is currently showing. */
+export function refreshPointCloudColor() {
+  if (!currentPointCloud) return;
+  const canvas2D = document.getElementById('canvas');
+  currentPointCloud.refreshFrom(canvas2D);
 }
 
 export function dispose3D() {
