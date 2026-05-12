@@ -57,6 +57,16 @@ export function mountTree(state, onSelect, onChange, onRequestAddLight) {
     return renderGroupRow(node, depth);
   }
 
+  function lightIcon(type) {
+    const icons = {
+      directional: '☀',
+      point: '⊙',
+      spotlight: '◉',
+      reflector: '▭',
+    };
+    return icons[type] || '○';
+  }
+
   function renderLightRow(L, depth) {
     const li = document.createElement('li');
     li.className = 'tree-row tree-light';
@@ -68,6 +78,7 @@ export function mountTree(state, onSelect, onChange, onRequestAddLight) {
     dot.className = 'tree-dot';
     dot.style.background = slotColor(L);
     li.appendChild(dot);
+    li.appendChild(span('tree-icon', lightIcon(L.type)));
     li.appendChild(span('tree-name', L.name));
     li.appendChild(eyeButton(L));
     li.addEventListener('click', (e) => {
