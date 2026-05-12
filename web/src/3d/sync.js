@@ -38,6 +38,10 @@ function shallowLightEqual(a, b) {
   if ((a.cone_angle ?? null) !== (b.cone_angle ?? null)) return false;
   if ((a.intensity ?? null) !== (b.intensity ?? null)) return false;
   if ((a.enabled ?? true) !== (b.enabled ?? true)) return false;
+  if (!arrayEq(a.normal, b.normal)) return false;
+  if (!arrayEq(a.size, b.size)) return false;
+  if ((a.reflectance ?? null) !== (b.reflectance ?? null)) return false;
+  if ((a.roughness ?? null) !== (b.roughness ?? null)) return false;
   return true;
 }
 

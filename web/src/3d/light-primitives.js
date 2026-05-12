@@ -17,6 +17,10 @@ const ARROW_LENGTH = 0.25;
 const CONE_LENGTH = 0.6;
 
 export function buildLightPrimitive(light) {
+  if (light.type === 'reflector') {
+    return buildReflectorPrimitive(light);
+  }
+
   const group = new THREE.Group();
   group.userData.lightId = light.id;
   group.position.set(...lightToWorld(light.position));
@@ -95,6 +99,84 @@ function update(prim, light) {
   }
 }
 
+function buildReflectorPrimitive(light) {
+  const group = new THREE.Group();
+  group.userData.lightId = light.id;
+  group.position.set(...lightToWorld(light.position));
+
+  const sx = light.size?.[0] ?? 0.6;
+  const sy = light.size?.[1] ?? 0.4;
+
+  const planeGeo = new THREE.PlaneGeometry(sx, sy);
+  const tintHex  = rgbToHex(light.color);
+
+  const front = new THREE.MeshBasicMaterial({
+    color: tintHex, transparent: true, opacity: 0.5, side: THREE.FrontSide,
+  });
+  const back  = new THREE.MeshBasicMaterial({
+    color: 0x222222, side: THREE.BackSide,
+  });
+
+  const plane = new THREE.Mesh(planeGeo, front);
+  plane.userData.lightId = light.id;
+  group.add(plane);
+  const planeBack = new THREE.Mesh(planeGeo, back);
+  planeBack.userData.lightId = light.id;
+  group.add(planeBack);
+
+  // Orient so plane's local +Z (its normal) matches the engine normal in world.
+  const worldNormal = new THREE.Vector3(...directionToWorld(light.normal));
+  plane.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), worldNormal);
+  planeBack.quaternion.copy(plane.quaternion);
+
+  // Hit target: a slightly larger invisible double-sided plane for raycast.
+  const hitGeo = new THREE.PlaneGeometry(sx * 1.1, sy * 1.1);
+  const hitMat = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide });
+  const hit = new THREE.Mesh(hitGeo, hitMat);
+  hit.userData.lightId = light.id;
+  hit.userData.isHitTarget = true;
+  hit.quaternion.copy(plane.quaternion);
+  group.add(hit);
+
+  // Selection outline (rectangle wire edges, yellow).
+  const outlineGeo = new THREE.EdgesGeometry(planeGeo);
+  const outlineMat = new THREE.LineBasicMaterial({ color: 0xffff00 });
+  const outline = new THREE.LineSegments(outlineGeo, outlineMat);
+  outline.visible = false;
+  outline.quaternion.copy(plane.quaternion);
+  group.add(outline);
+
+  const prim = {
+    group, sphere: plane, hit, arrow: null, cone: null, outline,
+    _planeBack: planeBack,
+  };
+  prim.update = (next) => updateReflector(prim, next);
+  return prim;
+}
+
+function updateReflector(prim, light) {
+  prim.group.position.set(...lightToWorld(light.position));
+  const sx = light.size?.[0] ?? 0.6;
+  const sy = light.size?.[1] ?? 0.4;
+
+  // Rebuild geometries on every update (cheap, simple). Dispose old.
+  prim.sphere.geometry.dispose();
+  prim.sphere.geometry = new THREE.PlaneGeometry(sx, sy);
+  prim._planeBack.geometry.dispose();
+  prim._planeBack.geometry = new THREE.PlaneGeometry(sx, sy);
+  prim.hit.geometry.dispose();
+  prim.hit.geometry = new THREE.PlaneGeometry(sx * 1.1, sy * 1.1);
+  prim.outline.geometry.dispose();
+  prim.outline.geometry = new THREE.EdgesGeometry(prim.sphere.geometry);
+
+  prim.sphere.material.color.set(rgbToHex(light.color));
+  const worldNormal = new THREE.Vector3(...directionToWorld(light.normal));
+  prim.sphere.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), worldNormal);
+  prim._planeBack.quaternion.copy(prim.sphere.quaternion);
+  prim.hit.quaternion.copy(prim.sphere.quaternion);
+  prim.outline.quaternion.copy(prim.sphere.quaternion);
+}
+
 function orientToDirection(mesh, direction) {
   // Cone geometry is built along -Y; rotate to point along the light's direction.
   const dir = new THREE.Vector3(...direction).normalize();
@@ -119,6 +201,10 @@ export function disposeLightPrimitive(prim) {
   }
   prim.outline.geometry.dispose();
   prim.outline.material.dispose();
+  if (prim._planeBack) {
+    prim._planeBack.geometry.dispose();
+    prim._planeBack.material.dispose();
+  }
   if (prim.group.parent) prim.group.parent.remove(prim.group);
 }
 
