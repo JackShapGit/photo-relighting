@@ -1,7 +1,13 @@
-"""POST /prepare — accept an image, run the engine, persist the session."""
+"""POST /prepare — accept an image, run the engine, persist the session.
+
+The core image-validation + engine + persistence logic lives in
+``prepare_image_bytes`` so other routes (notably ``/scenes/import``) can
+re-use it without going through HTTP.
+"""
 from __future__ import annotations
 
 import io
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -14,16 +20,31 @@ from relighting_engine.core.io import _srgb_to_linear  # internal helper, OK wit
 router = APIRouter()
 
 ALLOWED_FORMATS = {"JPEG", "PNG", "TIFF", "HEIF", "HEIC", "WEBP"}
-MAX_DIM = 4096
+MAX_DIM = 16384
 
 
-@router.post("/prepare", response_model=PrepareResponse)
-async def prepare(
-    request: Request,
-    image: UploadFile = File(...),
-    mode: Literal["interactive", "quality"] = Form("interactive"),
+def _make_thumb(pil: Image.Image, out: Path, max_side: int = 256) -> None:
+    """Write a max-256px JPEG thumbnail of the prepared image to `out`."""
+    img = pil.copy()
+    img.thumbnail((max_side, max_side), Image.LANCZOS)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    img.save(out, format="JPEG", quality=85)
+
+
+def prepare_image_bytes(
+    raw: bytes,
+    *,
+    engine,
+    sessions,
+    mode: Literal["interactive", "quality"] = "interactive",
+    segmenter: Literal["rmbg", "sam2"] = "rmbg",
 ) -> PrepareResponse:
-    raw = await image.read()
+    """Validate, run the engine, persist the session+source+thumbnail.
+
+    Returns the same ``PrepareResponse`` that ``POST /prepare`` produces.
+    Raises ``HTTPException`` on validation failures.
+    """
     try:
         pil = Image.open(io.BytesIO(raw))
         pil.load()
@@ -43,14 +64,27 @@ async def prepare(
     arr = np.asarray(pil).astype(np.float32) / 255.0
     arr = _srgb_to_linear(arr)
 
-    engine = getattr(request.app.state, "engine", None)
-    if engine is None:
-        from relighting_api.deps import get_engine
-        engine = get_engine()
-    prepared = engine.prepare(arr, mode=mode)
-
-    sessions = request.app.state.sessions
+    prepared = engine.prepare(arr, mode=mode, segmenter=segmenter)
     sid = sessions.put(prepared)
+
+    sess_dir = sessions.dir / sid
+    ext = fmt.lower()
+    if ext == "jpeg":
+        ext = "jpg"
+    (sess_dir / f"source.{ext}").write_bytes(raw)
+    _make_thumb(pil, sess_dir / "thumb.jpg")
+
+    # Persist SAM2 image embeddings (if SAM2 was the segmenter) so the
+    # /refine_mask route can re-decode quickly without re-encoding.
+    if segmenter == "sam2":
+        try:
+            seg = engine.get_segmenter("sam2")
+            ctx = getattr(seg, "last_ctx", None)
+            if ctx is not None and ctx.get("embeddings") is not None:
+                import torch
+                torch.save(ctx["embeddings"], sess_dir / "sam2_embeddings.pt")
+        except Exception as e:  # noqa: BLE001 — best-effort persistence
+            print(f"warning: failed to persist SAM2 embeddings: {e}")
 
     base = f"/cache/sessions/{sid}"
     assets = PreparedAssets(
@@ -58,6 +92,11 @@ async def prepare(
         depth_png_url=f"{base}/depth.png",
         normals_png_url=f"{base}/normals.png",
         mask_png_url=f"{base}/mask.png" if prepared.mask is not None else None,
+        confidence_png_url=(
+            f"{base}/confidence.png" if prepared.confidence is not None else None
+        ),
+        thumbnail_url=f"{base}/thumb.jpg",
+        source_url=f"{base}/source.{ext}",
     )
     return PrepareResponse(
         session_id=sid,
@@ -65,4 +104,22 @@ async def prepare(
         height=prepared.height,
         assets=assets,
         metadata=prepared.metadata,
+    )
+
+
+@router.post("/prepare", response_model=PrepareResponse)
+async def prepare(
+    request: Request,
+    image: UploadFile = File(...),
+    mode: Literal["interactive", "quality"] = Form("interactive"),
+    segmenter: Literal["rmbg", "sam2"] = Form("rmbg"),
+) -> PrepareResponse:
+    raw = await image.read()
+    engine = getattr(request.app.state, "engine", None)
+    if engine is None:
+        from relighting_api.deps import get_engine
+        engine = get_engine()
+    return prepare_image_bytes(
+        raw, engine=engine, sessions=request.app.state.sessions,
+        mode=mode, segmenter=segmenter,
     )

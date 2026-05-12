@@ -3,7 +3,7 @@
 // Public API: init(canvas), setAssets(urls), setLights(lights, ambient), draw().
 
 let gl, program, vao, locs;
-let texOriginal, texDepth, texNormals, texMask;
+let texOriginal, texDepth, texNormals, texMask, texConfidence;
 const goboTextures = new Map();   // gobo_id -> WebGLTexture
 
 // ---------------------------------------------------------------------------
@@ -66,7 +66,12 @@ export async function init(canvas) {
     u_depth:    gl.getUniformLocation(program, 'u_depth'),
     u_normals:  gl.getUniformLocation(program, 'u_normals'),
     u_mask:     gl.getUniformLocation(program, 'u_mask'),
+    u_confidence: gl.getUniformLocation(program, 'u_confidence'),
     u_haveMask: gl.getUniformLocation(program, 'u_haveMask'),
+    u_haveConfidence: gl.getUniformLocation(program, 'u_haveConfidence'),
+    u_shadowStyle: gl.getUniformLocation(program, 'u_shadowStyle'),
+    u_subjectDepth: gl.getUniformLocation(program, 'u_subjectDepth'),
+    u_maskOverlay: gl.getUniformLocation(program, 'u_maskOverlay'),
     u_ambient:  gl.getUniformLocation(program, 'u_ambient'),
     u_lightCount: gl.getUniformLocation(program, 'u_lightCount'),
     u_debugView: gl.getUniformLocation(program, 'u_debugView'),
@@ -125,6 +130,15 @@ export async function setAssets(urls, canvas) {
   texMask     = urls.mask_png_url
                 ? await loadTexture(urls.mask_png_url,   3)
                 : null;
+  texConfidence = urls.confidence_png_url
+                ? await loadTexture(urls.confidence_png_url, 12)
+                : null;
+}
+
+// Hot-swap the mask texture (used after /refine_mask returns a new mask.png).
+export async function reloadMaskTexture(url) {
+  if (!url) return;
+  texMask = await loadTexture(url, 3);
 }
 
 export async function ensureGoboTexture(goboId) {
@@ -157,7 +171,13 @@ export function draw(state) {
   gl.uniform1i(locs.u_depth, 1);
   gl.uniform1i(locs.u_normals, 2);
   gl.uniform1i(locs.u_mask, 3);
+  gl.uniform1i(locs.u_confidence, 12);
   gl.uniform1i(locs.u_haveMask, texMask ? 1 : 0);
+  gl.uniform1i(locs.u_haveConfidence, texConfidence ? 1 : 0);
+  const styleId = { off: 0, heightfield: 1, planar: 2 }[state.shadowStyle] ?? 0;
+  gl.uniform1i(locs.u_shadowStyle, styleId);
+  gl.uniform1f(locs.u_subjectDepth, state.subjectMedianDepth ?? 0.3);
+  gl.uniform1i(locs.u_maskOverlay, state.refineMode ? 1 : 0);
   gl.uniform1f(locs.u_ambient, state.ambient);
   gl.uniform1i(locs.u_debugView, encodeDebugView(state.debugView));
 

@@ -21,6 +21,7 @@ class PreparedImage:
     width: int
     height: int
     metadata: dict[str, Any] = field(default_factory=dict)
+    confidence: np.ndarray | None = None  # (H, W) float32 in [0, 1], or None
 
     def validate(self) -> None:
         h, w = self.height, self.width
@@ -40,3 +41,9 @@ class PreparedImage:
                 raise ValueError(f"mask shape/dtype: {self.mask.shape}/{self.mask.dtype}")
             if self.mask.min() < -1e-4 or self.mask.max() > 1 + 1e-4:
                 raise ValueError("mask must be in [0, 1]")
+        if self.confidence is not None:
+            if self.confidence.shape != (h, w) or self.confidence.dtype != np.float32:
+                raise ValueError(
+                    f"confidence shape/dtype: {self.confidence.shape}/{self.confidence.dtype}")
+            if self.confidence.min() < -1e-4 or self.confidence.max() > 1 + 1e-4:
+                raise ValueError("confidence must be in [0, 1]")

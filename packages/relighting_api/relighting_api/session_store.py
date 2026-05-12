@@ -6,6 +6,7 @@ Disk layout (under cache/sessions/{session_id}/):
     depth.npy
     normals.npy
     mask.npy          — only present when mask is not None
+    confidence.npy    — only present when confidence is not None
     meta.json         — width, height, metadata dict
 """
 from __future__ import annotations
@@ -50,6 +51,8 @@ class SessionStore:
         np.save(d / "normals.npy", prepared.normals)
         if prepared.mask is not None:
             np.save(d / "mask.npy", prepared.mask)
+        if prepared.confidence is not None:
+            np.save(d / "confidence.npy", prepared.confidence)
         (d / "meta.json").write_text(json.dumps({
             "width": prepared.width,
             "height": prepared.height,
@@ -71,6 +74,9 @@ class SessionStore:
         if p.mask is not None:
             mask8 = np.clip(p.mask * 255 + 0.5, 0, 255).astype(np.uint8)
             Image.fromarray(mask8, mode="L").save(d / "mask.png")
+        if p.confidence is not None:
+            conf8 = np.clip(p.confidence * 255 + 0.5, 0, 255).astype(np.uint8)
+            Image.fromarray(conf8, mode="L").save(d / "confidence.png")
 
     def get(self, sid: str) -> PreparedImage | None:
         if sid in self._mem:
@@ -85,8 +91,10 @@ class SessionStore:
         depth = np.load(d / "depth.npy")
         normals = np.load(d / "normals.npy")
         mask = np.load(d / "mask.npy") if (d / "mask.npy").exists() else None
+        confidence = np.load(d / "confidence.npy") if (d / "confidence.npy").exists() else None
         prepared = PreparedImage(
             original=original, depth=depth, normals=normals, mask=mask,
+            confidence=confidence,
             width=meta["width"], height=meta["height"], metadata=meta["metadata"],
         )
         self._mem[sid] = (prepared, time.monotonic())

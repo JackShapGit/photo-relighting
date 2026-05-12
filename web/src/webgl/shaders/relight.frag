@@ -11,7 +11,12 @@ uniform sampler2D u_original;     // sRGB texture; sample → linear via interna
 uniform sampler2D u_depth;        // R channel = depth
 uniform sampler2D u_normals;      // (n*0.5 + 0.5) RGB
 uniform sampler2D u_mask;
+uniform sampler2D u_confidence;   // R channel = per-pixel depth confidence in [0, 1]
 uniform int u_haveMask;
+uniform int u_haveConfidence;
+uniform int u_shadowStyle;        // 0 = off, 1 = heightfield, 2 = planar
+uniform float u_subjectDepth;     // median depth of masked subject; ~0.3 fallback
+uniform int u_maskOverlay;        // 0 = off, 1 = blue tint over masked pixels (refine mode)
 uniform float u_ambient;
 uniform int u_debugView;
 
@@ -64,6 +69,61 @@ vec2 equirect_uv(vec3 P, vec3 pos) {
   return vec2(0.5 + theta / 6.283185, 0.5 + phi / 3.141593);
 }
 
+// Heightfield ray-march toward the light. Returns 1.0 if the ray reaches the
+// light, 0.0 if the depth heightfield occludes it.
+// Mirror of shaders.py::_shadow_factor.
+float heightfield_shadow(vec3 P, vec3 L_vec) {
+  const int STEPS = 16;
+  const float MAX_DIST = 0.6;
+  const float BIAS = 0.003;
+  for (int i = 1; i <= STEPS; i++) {
+    float t = float(i) / float(STEPS) * MAX_DIST;
+    vec3 sp = P + L_vec * t;
+    if (sp.x < 0.0 || sp.x > 1.0 || sp.y < 0.0 || sp.y > 1.0) break;
+    float surface_z = texture(u_depth, sp.xy).r;
+    if (surface_z + BIAS < sp.z) return 0.0;
+  }
+  return 1.0;
+}
+
+// Planar silhouette projection. Trace from each pixel toward the light; where
+// the ray crosses the subject's plane (at u_subjectDepth) we sample the mask
+// — if the subject is there, this pixel is in shadow. A small box-blur in
+// shader form gives a soft penumbra.
+// Mirror of shaders.py::_planar_shadow.
+float planar_shadow(vec3 P, vec3 L_vec, float maskV) {
+  if (u_haveMask == 0) return 1.0;
+  float Rz = L_vec.z;
+  // Clamp |Rz| away from zero (very oblique lights stretch infinitely).
+  if (abs(Rz) < 0.05) Rz = (Rz >= 0.0 ? 0.05 : -0.05);
+  float t = (u_subjectDepth - P.z) / Rz;
+  if (t <= 0.0) return 1.0;            // subject is in front of us, can't shadow
+  if (maskV >= 0.5) return 1.0;        // don't shadow subject pixels themselves
+
+  vec2 sample_uv = P.xy + L_vec.xy * t;
+  if (sample_uv.x < 0.0 || sample_uv.x > 1.0 ||
+      sample_uv.y < 0.0 || sample_uv.y > 1.0) return 1.0;
+
+  // 5×5 box-blur of the mask sample. Texture filtering already gives bilinear,
+  // and the texelSize-based offsets give a small penumbra.
+  vec2 px = 1.0 / vec2(textureSize(u_mask, 0));
+  float acc = 0.0;
+  for (int dy = -2; dy <= 2; dy++) {
+    for (int dx = -2; dx <= 2; dx++) {
+      vec2 uv = sample_uv + vec2(float(dx), float(dy)) * px * 3.0;
+      acc += texture(u_mask, uv).r;
+    }
+  }
+  float occ = acc / 25.0;
+  return clamp(1.0 - occ * 0.85, 0.0, 1.0);
+}
+
+float shadow_factor(vec3 P, vec3 L_vec, float maskV) {
+  if (u_shadowStyle == 1) return heightfield_shadow(P, L_vec);
+  if (u_shadowStyle == 2) return planar_shadow(P, L_vec, maskV);
+  return 1.0;
+}
+
 float sample_gobo(int i, vec2 uv) {
   // WebGL2 doesn't allow dynamic indexing of sampler arrays; expand a switch.
   // For MVP we keep gobo sampling simple — only key/fill/rim use gobos via slots 0..2.
@@ -84,6 +144,7 @@ void main() {
   vec3 N = texture(u_normals, v_uv).rgb * 2.0 - 1.0;
   N = normalize(N);
   float maskV = u_haveMask == 1 ? texture(u_mask, v_uv).r : 1.0;
+  float confV = u_haveConfidence == 1 ? texture(u_confidence, v_uv).r : 1.0;
 
   if (u_debugView == 1) { fragColor = vec4(vec3(depth), 1.0); return; }
   if (u_debugView == 2) { fragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
@@ -91,6 +152,8 @@ void main() {
 
   vec3 P = vec3(v_uv.x, v_uv.y, depth);
 
+  // Confidence weights only the per-light contributions (not ambient), so
+  // low-confidence regions still get ambient illumination from the original.
   vec3 total = u_ambient * original;
   for (int i = 0; i < MAX_LIGHTS; i++) {
     if (i >= u_lightCount) break;
@@ -136,9 +199,25 @@ void main() {
                 : u_l_affects[i] == 1 ? maskV
                 : (1.0 - maskV);
 
-    total += original * u_l_color[i] * u_l_intensity[i] * diff * atten * cone * gobo * maskW;
+    float shadow = shadow_factor(P, Lvec, maskV);
+    total += original * u_l_color[i] * u_l_intensity[i] * diff * atten * cone * gobo * maskW * confV * shadow;
   }
 
   total = clamp(total, vec3(0.0), vec3(1.0));
-  fragColor = vec4(total, 1.0);
+  // Refine-mode mask overlay: blend a translucent blue over masked pixels so
+  // the user can see what's currently selected. Applied in linear space then
+  // sRGB-encoded below with everything else.
+  if (u_maskOverlay == 1 && u_haveMask == 1) {
+    vec3 tint = vec3(0.18, 0.45, 0.95);
+    total = mix(total, tint, maskV * 0.45);
+  }
+  // Linear → sRGB (IEC 61966-2-1 piecewise) — matches engine io._linear_to_srgb.
+  // Without this, the canvas backbuffer (RGBA8, no sRGB framebuffer) makes linear
+  // mid-tones display ~2× too dark vs the exported PNG (which is sRGB-encoded + ICC-tagged).
+  vec3 srgb = mix(
+    total * 12.92,
+    (1.0 + 0.055) * pow(max(total, vec3(1e-6)), vec3(1.0 / 2.4)) - 0.055,
+    step(vec3(0.0031308), total)
+  );
+  fragColor = vec4(srgb, 1.0);
 }

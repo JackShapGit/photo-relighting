@@ -14,7 +14,8 @@ from relighting_engine.core.prepared import PreparedImage
 
 
 class FakeEngine:
-    def prepare(self, img: np.ndarray, mode: str = "interactive") -> PreparedImage:
+    def prepare(self, img: np.ndarray, mode: str = "interactive",
+                *, segmenter: str = "rmbg") -> PreparedImage:
         h, w = img.shape[:2]
         return PreparedImage(
             original=img.astype(np.float32),
@@ -51,8 +52,13 @@ def test_prepare_returns_session_with_asset_urls(client: TestClient) -> None:
     assert body["metadata"]["depth_model"] == "fake"
 
 
-def test_prepare_rejects_oversize_image(client: TestClient) -> None:
-    big = _png_bytes(h=4097, w=4097)
+def test_prepare_rejects_oversize_image(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Lower MAX_DIM so we can test the gate without allocating a huge image.
+    from relighting_api.routes import prepare as prepare_route
+    monkeypatch.setattr(prepare_route, "MAX_DIM", 64)
+    big = _png_bytes(h=65, w=65)
     r = client.post("/prepare", files={"image": ("big.png", big, "image/png")})
     assert r.status_code == 413
 

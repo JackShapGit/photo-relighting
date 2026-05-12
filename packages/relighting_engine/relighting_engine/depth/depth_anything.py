@@ -2,6 +2,8 @@
 
 Public surface:
     DepthAnythingBackend(device).infer(image, mode) -> depth (H, W) float32 [0, 1]
+    DepthAnythingBackend(device).infer_with_conf(image, mode)
+        -> (depth, conf) both (H, W) float32 [0, 1]
 
 Two modes:
     interactive  - input long-side capped at 1024 px before inference, then upsampled
@@ -58,12 +60,12 @@ class DepthAnythingBackend:
         )
 
     @torch.inference_mode()
-    def infer(
+    def infer_with_conf(
         self,
         image: np.ndarray,
         mode: Literal["interactive", "quality"] = "interactive",
-    ) -> np.ndarray:
-        """Run depth estimation on a single image.
+    ) -> tuple[np.ndarray, np.ndarray | None]:
+        """Run depth estimation, returning (depth, confidence) both at input resolution.
 
         Parameters
         ----------
@@ -75,26 +77,20 @@ class DepthAnythingBackend:
 
         Returns
         -------
-        np.ndarray
-            ``(H, W) float32`` depth map normalized to [0, 1].
-            0 = nearest, 1 = farthest.
+        tuple[np.ndarray, np.ndarray | None]
+            ``depth``: ``(H, W) float32`` normalized to [0, 1] (0 = nearest, 1 = farthest).
+            ``conf``: ``(H, W) float32`` per-pixel confidence min-max-normalized to [0, 1]
+            (1 = most confident), or ``None`` if the model didn't return one.
         """
         self._load()
 
         h, w = image.shape[:2]
         cap = _MODE_CAPS[mode]
 
-        # Cap at the actual input long-side to avoid upsampling small images.
-        # upper_bound_resize scales the longest side exactly to process_res, which
-        # means a 720x1280 image with process_res=4096 would be upsampled 3.2x and
-        # likely cause OOM. Always use native resolution when smaller than the cap.
         long_side = max(h, w)
         process_res = min(long_side, cap)
         self.last_inference_long_side = process_res
 
-        # Convert float32 [0,1] -> uint8 [0,255] (DA3 trained on standard JPEG/PNG).
-        # This is a small systematic shift accepted for MVP; DA3's normalization
-        # handles the rest.
         image_uint8 = (image * 255.0).clip(0, 255).astype(np.uint8)
 
         prediction = self._model.inference(  # type: ignore[union-attr]
@@ -104,23 +100,50 @@ class DepthAnythingBackend:
             export_dir=None,
         )
 
-        depth = prediction.depth  # numpy ndarray, shape (N, H_out, W_out) float32
+        depth = prediction.depth
         if isinstance(depth, torch.Tensor):
             depth = depth.cpu().numpy()
-
-        # Squeeze batch dimension -> (H_out, W_out)
         depth = depth[0]
-
-        # Upsample back to original input resolution if inference resolution differs.
         if depth.shape != (h, w):
             depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_LINEAR)
 
-        # Min-max normalize to [0, 1].
         d_min = float(depth.min())
         d_max = float(depth.max())
         if (d_max - d_min) < 1e-6:
-            # Degenerate flat image — return zeros.
-            return np.zeros((h, w), dtype=np.float32)
+            depth_norm = np.zeros((h, w), dtype=np.float32)
+        else:
+            depth_norm = ((depth - d_min) / (d_max - d_min)).astype(np.float32)
 
-        depth = (depth - d_min) / (d_max - d_min)
-        return depth.astype(np.float32)
+        conf = getattr(prediction, "conf", None)
+        if conf is None:
+            return depth_norm, None
+        if isinstance(conf, torch.Tensor):
+            conf = conf.cpu().numpy()
+        conf = conf[0]
+        if conf.shape != (h, w):
+            conf = cv2.resize(conf, (w, h), interpolation=cv2.INTER_LINEAR)
+
+        # DA3's confidence is bimodal — featureless smooth regions (skies,
+        # walls) score low not because the depth is wrong but because there's
+        # nothing to anchor on. Min-max normalization would crush lighting on
+        # those regions, so we use a robust percentile-based ramp with a floor:
+        # everything at-or-above the median gets full lighting; the bottom
+        # decile is held at FLOOR; the 10th–50th percentile tier ramps smoothly.
+        FLOOR = 0.5
+        p10 = float(np.percentile(conf, 10))
+        p50 = float(np.percentile(conf, 50))
+        if (p50 - p10) < 1e-6:
+            conf_norm = np.ones((h, w), dtype=np.float32)
+        else:
+            raw = np.clip((conf - p10) / (p50 - p10), 0.0, 1.0)
+            conf_norm = (FLOOR + (1.0 - FLOOR) * raw).astype(np.float32)
+        return depth_norm, conf_norm
+
+    def infer(
+        self,
+        image: np.ndarray,
+        mode: Literal["interactive", "quality"] = "interactive",
+    ) -> np.ndarray:
+        """Backward-compatible wrapper that returns depth only (see ``infer_with_conf``)."""
+        depth, _ = self.infer_with_conf(image, mode=mode)
+        return depth
