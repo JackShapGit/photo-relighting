@@ -26,6 +26,7 @@ from relighting_engine.core.prepared import PreparedImage
 from relighting_engine.lighting.gels import resolve_color
 from relighting_engine.lighting.gobo import project_uv
 from relighting_engine.lighting.models import Light
+from relighting_engine.lighting.reflectors import compute_reflector_emission
 
 
 def _make_world_pos(h: int, w: int, depth: torch.Tensor) -> torch.Tensor:
@@ -188,6 +189,10 @@ def render(
     P = _make_world_pos(h, w, depth)
     total = ambient * original
 
+    # Split lights into regular emitters and reflectors for two-stage processing.
+    emitters   = [L for L in lights if L.type != 'reflector']
+    reflectors = [L for L in lights if L.type == 'reflector']
+
     # Confidence-aware lighting: low-confidence pixels (edges, hair, depth
     # discontinuities where DA3 is unsure) fall back to ambient. The mask is
     # broadcast over the per-light contribution sum below, not over `ambient *
@@ -199,7 +204,7 @@ def render(
 
     gobo_textures = gobo_textures or {}
 
-    for L in lights:
+    for L in emitters:
         if not L.enabled:
             continue
         L.validate()
@@ -271,6 +276,53 @@ def render(
         if conf is not None:
             contrib = contrib * conf
         total = total + contrib
+
+    # Reflector contribution (Stage 2 of two-stage reflector math).
+    refl_data = compute_reflector_emission(reflectors, emitters)
+    for R, (emission_np, dom_dir_np) in zip(reflectors, refl_data):
+        if not R.enabled:
+            continue
+        if float((emission_np ** 2).sum()) < 1e-12:
+            continue
+
+        R_pos    = torch.tensor(R.position, device=device, dtype=torch.float32)
+        R_normal = torch.tensor(R.normal,   device=device, dtype=torch.float32)
+        R_normal = R_normal / (R_normal.norm() + 1e-9)
+        size_area = float(R.size[0] * R.size[1])
+        roughness = float(R.roughness)
+
+        # Per-pixel Lvec (toward reflector).
+        Lvec_full = R_pos[None, None, :] - P                      # (H, W, 3)
+        dist      = Lvec_full.norm(dim=-1, keepdim=True) + 1e-6   # (H, W, 1)
+        Lvec      = Lvec_full / dist                               # (H, W, 3)
+
+        facing = (-Lvec * R_normal[None, None, :]).sum(dim=-1).clamp(min=0.0)  # (H, W)
+        atten  = size_area / (dist.squeeze(-1) ** 2 + 1.0)                      # (H, W)
+        ndotl  = (normals * Lvec).sum(dim=-1).clamp(min=0.0)                    # (H, W)
+
+        diffuse_w  = roughness
+        diffuse    = ndotl * diffuse_w * facing * atten                          # (H, W)
+
+        glossy_w   = 1.0 - roughness
+        lobe_sharp = 2.0 + (1.0 - roughness) * 48.0
+        dom_t      = torch.tensor(dom_dir_np, device=device, dtype=torch.float32)
+        align      = (Lvec * dom_t[None, None, :]).sum(dim=-1).clamp(min=0.0)   # (H, W)
+        glossy     = (align ** lobe_sharp) * glossy_w * facing * atten           # (H, W)
+
+        emit_t  = torch.tensor(emission_np, device=device, dtype=torch.float32)
+        contrib = (diffuse + glossy)[..., None] * emit_t[None, None, :]          # (H, W, 3)
+
+        # Apply affects gating — match the existing per-emitter convention.
+        if R.affects == 'subject':
+            mask_w = mask
+        elif R.affects == 'background':
+            mask_w = 1.0 - mask
+        else:
+            mask_w = torch.ones((h, w), device=device, dtype=torch.float32)
+
+        if conf is not None:
+            contrib = contrib * conf
+        total = total + contrib * mask_w[..., None]
 
     out = torch.clamp(total, 0.0, 1.0)
     return out.cpu().numpy().astype(np.float32)

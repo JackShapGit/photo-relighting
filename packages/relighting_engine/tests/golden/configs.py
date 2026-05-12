@@ -13,6 +13,10 @@ FIXTURES = [
     "wide_gamut.tiff", "hi_res.png", "dark_scene.jpg", "small.jpg",
 ]
 
+# Fixtures that have a reflector_fill golden. Only portrait_a is listed here
+# because it's the only source image guaranteed to exist in CI.
+REFLECTOR_FIXTURES = ["portrait_a.jpg"]
+
 
 def configs() -> list[tuple[str, list[Light], float]]:
     return [
@@ -35,4 +39,20 @@ def configs() -> list[tuple[str, list[Light], float]]:
             Light(type="directional", direction=(0.0, 0.0, 1.0), intensity=1.0,
                   affects="subject", color_temperature=7500),
         ], 0.1),
+        ("reflector_fill", [
+            Light(type="directional",
+                  position=(0.7, 0.3, -0.4),
+                  direction=(-0.5, 0.3, -1.0),
+                  color=(1.0, 0.95, 0.85),
+                  intensity=1.2,
+                  color_temperature=5500),
+            Light(type="reflector",
+                  position=(0.25, 0.55, -0.4),
+                  direction=(0.0, 0.0, -1.0),
+                  color=(1.0, 0.95, 0.9),
+                  normal=(0.5, 0.0, 1.0),
+                  size=(0.6, 0.4),
+                  reflectance=0.7,
+                  roughness=0.6),
+        ], 0.15),
     ]
