@@ -18,6 +18,7 @@ node_modules/
 .playwright/
 test-results/
 playwright-report/
+.env.demo
 
 # OS
 .DS_Store
