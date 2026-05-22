@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from relighting_api import auth
 from relighting_api.routes import gobos as gobos_route
 from relighting_api.routes import health as health_route
 from relighting_api.routes import polish as polish_route
@@ -25,6 +26,7 @@ def create_app(skip_engine: bool = False) -> FastAPI:
     scenes_db = Path(os.environ.get("RELIGHT_SCENES_DB", "cache/scenes.db"))
 
     app = FastAPI(title="relighting-api", version="0.1.0")
+    auth.install(app)
     app.state.sessions = SessionStore(cache_dir=cache_dir)
     app.state.scenes = SceneStore(db_path=scenes_db)
 
