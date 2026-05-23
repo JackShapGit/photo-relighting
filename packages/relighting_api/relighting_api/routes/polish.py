@@ -47,7 +47,10 @@ async def polish(req: PolishRequest, request: Request) -> Response:
         try:
             arr = engine.polish(
                 prepared, lights=lights,
-                ambient=req.ambient, shadow_style=req.shadow_style,
+                ambient=req.ambient,
+                ambient_subject=req.ambient_subject,
+                ambient_background=req.ambient_background,
+                shadow_style=req.shadow_style,
                 prompt=req.prompt, seed=req.seed,
                 output_resolution=out_res,
             )

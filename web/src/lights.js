@@ -217,6 +217,9 @@ export function defaultSceneState() {
   return {
     tree: [key, rim],
     ambient: 0.2,
+    ambientSubject: 0.2,
+    ambientBackground: 0.2,
+    ambientLinked: true,
     debugView: 'render',
     shadowStyle: 'off',
     selectedId: key.id,
@@ -238,6 +241,9 @@ export function newState() {
     tree,
     lights: [],                           // populated by syncLights below
     ambient: 0.2,
+    ambientSubject: 0.2,
+    ambientBackground: 0.2,
+    ambientLinked: true,
     debugView: 'render',
     shadowStyle: 'off',                   // 'off' | 'heightfield' | 'planar'
     subjectMedianDepth: 0.3,              // populated from prepare metadata

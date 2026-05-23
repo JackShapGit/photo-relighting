@@ -75,6 +75,8 @@ export async function init(canvas) {
     u_subjectDepth: gl.getUniformLocation(program, 'u_subjectDepth'),
     u_maskOverlay: gl.getUniformLocation(program, 'u_maskOverlay'),
     u_ambient:  gl.getUniformLocation(program, 'u_ambient'),
+    u_ambient_subject:    gl.getUniformLocation(program, 'u_ambient_subject'),
+    u_ambient_background: gl.getUniformLocation(program, 'u_ambient_background'),
     u_lightCount: gl.getUniformLocation(program, 'u_lightCount'),
     u_debugView: gl.getUniformLocation(program, 'u_debugView'),
     // light array uniforms — per-field arrays of length 8
@@ -191,6 +193,12 @@ export function draw(state) {
   gl.uniform1f(locs.u_subjectDepth, state.subjectMedianDepth ?? 0.3);
   gl.uniform1i(locs.u_maskOverlay, state.refineMode ? 1 : 0);
   gl.uniform1f(locs.u_ambient, state.ambient);
+  const aSubj = state.ambientLinked === false && state.ambientSubject != null
+    ? state.ambientSubject : state.ambient;
+  const aBg = state.ambientLinked === false && state.ambientBackground != null
+    ? state.ambientBackground : state.ambient;
+  gl.uniform1f(locs.u_ambient_subject, aSubj);
+  gl.uniform1f(locs.u_ambient_background, aBg);
   gl.uniform1i(locs.u_debugView, encodeDebugView(state.debugView));
 
   const allLights = state.lights || [];

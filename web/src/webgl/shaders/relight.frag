@@ -18,6 +18,8 @@ uniform int u_shadowStyle;        // 0 = off, 1 = heightfield, 2 = planar
 uniform float u_subjectDepth;     // median depth of masked subject; ~0.3 fallback
 uniform int u_maskOverlay;        // 0 = off, 1 = blue tint over masked pixels (refine mode)
 uniform float u_ambient;
+uniform float u_ambient_subject;
+uniform float u_ambient_background;
 uniform int u_debugView;
 
 uniform int  u_l_type[MAX_LIGHTS];
@@ -166,7 +168,12 @@ void main() {
 
   // Confidence weights only the per-light contributions (not ambient), so
   // low-confidence regions still get ambient illumination from the original.
-  vec3 total = u_ambient * original;
+  // Per-zone ambient: subject vs background blended by mask. When no mask is
+  // present we fall back to the global ambient.
+  float ambient_v = u_haveMask == 1
+    ? mix(u_ambient_background, u_ambient_subject, maskV)
+    : u_ambient;
+  vec3 total = ambient_v * original;
   for (int i = 0; i < MAX_LIGHTS; i++) {
     if (i >= u_lightCount) break;
     if (u_l_enabled[i] == 0) continue;

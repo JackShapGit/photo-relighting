@@ -124,7 +124,15 @@ function renderSceneProps(state, container, redraw) {
       <span class="tree-icon">⌂</span>
       <h2>Scene</h2>
     </div>
-    <label>Ambient <input id="ambient" type="range" min="0" max="1" step="0.01" /></label>
+    <label>Ambient (All) <input id="ambient" type="range" min="0" max="1" step="0.01" /></label>
+    <label class="checkbox-row">
+      <input type="checkbox" id="ambient-per-zone" />
+      Per zone (subject / background)
+    </label>
+    <div id="ambient-zones" hidden>
+      <label>Subject    <input id="ambient-subject"    type="range" min="0" max="1" step="0.01" /></label>
+      <label>Background <input id="ambient-background" type="range" min="0" max="1" step="0.01" /></label>
+    </div>
     <label>Show
       <select id="debug-view">
         <option value="render">Render</option>
@@ -142,9 +150,48 @@ function renderSceneProps(state, container, redraw) {
     </label>
   `;
   const ambient = container.querySelector('#ambient');
+  const perZone = container.querySelector('#ambient-per-zone');
+  const zones   = container.querySelector('#ambient-zones');
+  const subj    = container.querySelector('#ambient-subject');
+  const bg      = container.querySelector('#ambient-background');
+
   ambient.value = state.ambient;
+  subj.value    = state.ambientSubject ?? state.ambient;
+  bg.value      = state.ambientBackground ?? state.ambient;
+  perZone.checked = state.ambientLinked === false;
+  zones.hidden    = !perZone.checked;
+
   ambient.addEventListener('input', () => {
-    state.ambient = parseFloat(ambient.value);
+    const v = parseFloat(ambient.value);
+    state.ambient = v;
+    // When linked, the All slider drives both zones so they stay in sync —
+    // this matches the back-compat behavior of a single ambient knob.
+    if (state.ambientLinked !== false) {
+      state.ambientSubject = v;
+      state.ambientBackground = v;
+      subj.value = v;
+      bg.value = v;
+    }
+    redraw();
+  });
+  perZone.addEventListener('change', () => {
+    state.ambientLinked = !perZone.checked;
+    zones.hidden = !perZone.checked;
+    // Re-linking snaps both zones back to the All value.
+    if (!perZone.checked) {
+      state.ambientSubject = state.ambient;
+      state.ambientBackground = state.ambient;
+      subj.value = state.ambient;
+      bg.value = state.ambient;
+    }
+    redraw();
+  });
+  subj.addEventListener('input', () => {
+    state.ambientSubject = parseFloat(subj.value);
+    redraw();
+  });
+  bg.addEventListener('input', () => {
+    state.ambientBackground = parseFloat(bg.value);
     redraw();
   });
   const debug = container.querySelector('#debug-view');

@@ -8,7 +8,7 @@ import {
 import {
   prepare, listGobos, render as serverRender,
   listScenes, getScene, createScene, updateScene, renameScene,
-  refineMask, getCapabilities,
+  refineMask, getCapabilities, currentWorkspace,
 } from './api.js';
 import {
   invalidatePolish,
@@ -57,6 +57,9 @@ function serializeSceneState() {
   return {
     tree: state.tree,
     ambient: state.ambient,
+    ambientSubject: state.ambientSubject,
+    ambientBackground: state.ambientBackground,
+    ambientLinked: state.ambientLinked,
     debugView: state.debugView,
     shadowStyle: state.shadowStyle,
     selectedId: state.selectedId,
@@ -214,6 +217,10 @@ async function applyScene(scene) {
   const s = scene.state || {};
   if (Array.isArray(s.tree) && s.tree.length) state.tree = s.tree;
   state.ambient = s.ambient ?? 0.2;
+  // Legacy scenes only have `ambient` — initialize subject/background to match.
+  state.ambientSubject = s.ambientSubject ?? state.ambient;
+  state.ambientBackground = s.ambientBackground ?? state.ambient;
+  state.ambientLinked = s.ambientLinked ?? true;
   state.debugView = s.debugView ?? 'render';
   // Migrate the old castShadows boolean to the new shadowStyle enum.
   state.shadowStyle = s.shadowStyle ?? (s.castShadows ? 'heightfield' : 'off');
@@ -318,6 +325,8 @@ async function setupPolishUI() {
       sessionId: state.sessionId,
       lights: state.lights,
       ambient: state.ambient,
+      ambientSubject: state.ambientLinked === false ? state.ambientSubject : null,
+      ambientBackground: state.ambientLinked === false ? state.ambientBackground : null,
       shadowStyle: state.shadowStyle || 'off',
     });
   });
@@ -422,6 +431,15 @@ refreshProps();
       onChange();
     },
   });
+
+  // Workspace badge in the header — hide for the default workspace so the
+  // chrome stays clean for solo users; show "ws: alice" for namespaced URLs.
+  const wsLabel = document.getElementById('workspace-label');
+  if (wsLabel) {
+    const ws = currentWorkspace();
+    wsLabel.textContent = ws === 'default' ? '' : `ws: ${ws}`;
+    wsLabel.hidden = ws === 'default';
+  }
 
   try {
     const gobos = await listGobos();
@@ -607,6 +625,8 @@ document.getElementById('export-btn').addEventListener('click', async () => {
     session_id: state.sessionId,
     lights: state.lights,
     ambient: state.ambient,
+    ambient_subject: state.ambientLinked === false ? state.ambientSubject : null,
+    ambient_background: state.ambientLinked === false ? state.ambientBackground : null,
     shadow_style: state.shadowStyle || 'off',
     output_format: 'png',
     output_bit_depth: 8,

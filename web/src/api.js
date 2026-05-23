@@ -1,3 +1,23 @@
+// Workspace namespace — read once from the URL (?ws=alice). Defaults to
+// 'default' so people landing on the bare URL share one workspace. Append it
+// to scene-CRUD endpoints so two people on different URLs never see each
+// other's scene lists.
+const WORKSPACE = (() => {
+  try {
+    const ws = new URLSearchParams(window.location.search).get('ws');
+    return ws && /^[A-Za-z0-9_-]{1,32}$/.test(ws) ? ws : 'default';
+  } catch {
+    return 'default';
+  }
+})();
+
+export function currentWorkspace() { return WORKSPACE; }
+
+function wsUrl(path) {
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}workspace=${encodeURIComponent(WORKSPACE)}`;
+}
+
 export async function prepare(file, mode, segmenter = 'rmbg') {
   const fd = new FormData();
   fd.append('image', file);
@@ -42,19 +62,19 @@ export async function refineMask(sessionId, points) {
 // ─── Scenes API ──────────────────────────────────────────────────────────
 
 export async function listScenes() {
-  const r = await fetch('/scenes');
+  const r = await fetch(wsUrl('/scenes'));
   if (!r.ok) throw new Error(`/scenes: ${r.status}`);
   return r.json();
 }
 
 export async function getScene(id) {
-  const r = await fetch(`/scenes/${id}`);
+  const r = await fetch(wsUrl(`/scenes/${id}`));
   if (!r.ok) throw new Error(`/scenes/${id}: ${r.status}`);
   return r.json();
 }
 
 export async function createScene({ name, sessionId, state }) {
-  const r = await fetch('/scenes', {
+  const r = await fetch(wsUrl('/scenes'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name, session_id: sessionId, state }),
@@ -64,7 +84,7 @@ export async function createScene({ name, sessionId, state }) {
 }
 
 export async function updateScene(id, state) {
-  const r = await fetch(`/scenes/${id}`, {
+  const r = await fetch(wsUrl(`/scenes/${id}`), {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ state }),
@@ -74,7 +94,7 @@ export async function updateScene(id, state) {
 }
 
 export async function renameScene(id, name) {
-  const r = await fetch(`/scenes/${id}/name`, {
+  const r = await fetch(wsUrl(`/scenes/${id}/name`), {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -84,13 +104,13 @@ export async function renameScene(id, name) {
 }
 
 export async function deleteScene(id) {
-  const r = await fetch(`/scenes/${id}`, { method: 'DELETE' });
+  const r = await fetch(wsUrl(`/scenes/${id}`), { method: 'DELETE' });
   if (!r.ok) throw new Error(`/scenes DELETE: ${r.status}`);
   return r.json();
 }
 
 export async function exportSceneBlob(id) {
-  const r = await fetch(`/scenes/${id}/export`);
+  const r = await fetch(wsUrl(`/scenes/${id}/export`));
   if (!r.ok) throw new Error(`/scenes export: ${r.status}`);
   // Pull the filename out of Content-Disposition so saved files match
   // the server's "{name}.relight.zip" convention.
@@ -103,7 +123,7 @@ export async function exportSceneBlob(id) {
 export async function importScene(file) {
   const fd = new FormData();
   fd.append('file', file);
-  const r = await fetch('/scenes/import', { method: 'POST', body: fd });
+  const r = await fetch(wsUrl('/scenes/import'), { method: 'POST', body: fd });
   if (!r.ok) throw new Error(`/scenes import: ${r.status} ${await r.text()}`);
   return r.json();
 }
@@ -117,7 +137,9 @@ export async function getCapabilities() {
   return body.capabilities || { polish: false, segmenters: [] };
 }
 
-export async function polishScene({ sessionId, lights, ambient, shadowStyle,
+export async function polishScene({ sessionId, lights, ambient,
+                                    ambientSubject = null, ambientBackground = null,
+                                    shadowStyle,
                                     prompt = '', seed = null,
                                     outputFormat = 'png', outputBitDepth = 8,
                                     outputResolution = null }) {
@@ -128,6 +150,8 @@ export async function polishScene({ sessionId, lights, ambient, shadowStyle,
       session_id: sessionId,
       lights,
       ambient,
+      ambient_subject: ambientSubject,
+      ambient_background: ambientBackground,
       shadow_style: shadowStyle,
       prompt,
       seed,

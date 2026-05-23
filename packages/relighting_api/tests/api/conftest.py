@@ -28,20 +28,27 @@ class FakeEngine:
     def render(
         self, prepared, lights, ambient=0.2, output_resolution=None,
         shadow_style="off",
+        ambient_subject=None, ambient_background=None,
     ) -> np.ndarray:
         self.last_lights = list(lights)
         self.last_ambient = ambient
+        self.last_ambient_subject = ambient_subject
+        self.last_ambient_background = ambient_background
         self.last_shadow_style = shadow_style
         return np.full((prepared.height, prepared.width, 3), 0.5, dtype=np.float32)
 
     def polish(
-        self, prepared, lights, *, ambient=0.2, shadow_style="off",
+        self, prepared, lights, *, ambient=0.2,
+        ambient_subject=None, ambient_background=None,
+        shadow_style="off",
         prompt="", seed=None, output_resolution=None,
     ) -> np.ndarray:
         if self.polish_raises is not None:
             raise self.polish_raises
         self.last_lights = list(lights)
         self.last_ambient = ambient
+        self.last_ambient_subject = ambient_subject
+        self.last_ambient_background = ambient_background
         self.last_shadow_style = shadow_style
         self.last_prompt = prompt
         self.last_seed = seed

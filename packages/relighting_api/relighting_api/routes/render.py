@@ -33,6 +33,8 @@ async def render(req: RenderRequest, request: Request) -> Response:
     async with sessions.lock(req.session_id):
         try:
             arr = engine.render(prepared, lights=lights, ambient=req.ambient,
+                                ambient_subject=req.ambient_subject,
+                                ambient_background=req.ambient_background,
                                 output_resolution=out_res,
                                 shadow_style=req.shadow_style)
         except torch.cuda.OutOfMemoryError as e:

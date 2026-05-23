@@ -79,6 +79,8 @@ class RenderCommon(BaseModel):
     session_id: str
     lights: list[LightModel] = Field(default_factory=list)
     ambient: Annotated[float, Field(ge=0.0)] = 0.2
+    ambient_subject: Annotated[float | None, Field(ge=0.0)] = None
+    ambient_background: Annotated[float | None, Field(ge=0.0)] = None
     shadow_style: Literal["off", "heightfield", "planar"] = "off"
     output_format: Literal["png", "jpeg", "tiff"] = "png"
     output_bit_depth: Literal[8, 16, 32] = 8

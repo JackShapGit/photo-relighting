@@ -22,7 +22,20 @@ from typing import Any
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
+from relighting_api.scene_store import DEFAULT_WORKSPACE
+
 router = APIRouter(prefix="/scenes")
+
+# Workspaces are user-supplied URL strings, so we clamp them to a safe set —
+# alphanum + dash + underscore, 1..32 chars. Anything else 400s.
+_WORKSPACE_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+def _workspace(request: Request) -> str:
+    ws = request.query_params.get("workspace") or DEFAULT_WORKSPACE
+    if not _WORKSPACE_RE.match(ws):
+        raise HTTPException(status_code=400, detail="invalid workspace name")
+    return ws
 
 
 class CreateSceneRequest(BaseModel):
@@ -48,12 +61,13 @@ async def create_scene(req: CreateSceneRequest, request: Request) -> dict[str, A
         name=req.name.strip(),
         session_id=req.session_id,
         state=req.state,
+        workspace_id=_workspace(request),
     )
 
 
 @router.get("")
 async def list_scenes(request: Request) -> list[dict[str, Any]]:
-    scenes = request.app.state.scenes.list_recent()
+    scenes = request.app.state.scenes.list_recent(workspace_id=_workspace(request))
     sessions = request.app.state.sessions
     for s in scenes:
         sess_dir = sessions.dir / s["session_id"]
@@ -64,7 +78,7 @@ async def list_scenes(request: Request) -> list[dict[str, Any]]:
 
 @router.get("/{scene_id}")
 async def get_scene(scene_id: str, request: Request) -> dict[str, Any]:
-    scene = request.app.state.scenes.get(scene_id)
+    scene = request.app.state.scenes.get(scene_id, workspace_id=_workspace(request))
     if scene is None:
         raise HTTPException(status_code=404, detail="scene not found")
 
@@ -102,7 +116,9 @@ async def get_scene(scene_id: str, request: Request) -> dict[str, Any]:
 
 @router.put("/{scene_id}")
 async def update_scene(scene_id: str, req: UpdateSceneRequest, request: Request) -> dict[str, bool]:
-    if not request.app.state.scenes.update_state(scene_id, req.state):
+    if not request.app.state.scenes.update_state(
+        scene_id, req.state, workspace_id=_workspace(request),
+    ):
         raise HTTPException(status_code=404, detail="scene not found")
     return {"ok": True}
 
@@ -111,14 +127,16 @@ async def update_scene(scene_id: str, req: UpdateSceneRequest, request: Request)
 async def rename_scene(
     scene_id: str, req: RenameSceneRequest, request: Request,
 ) -> dict[str, bool]:
-    if not request.app.state.scenes.rename(scene_id, req.name.strip()):
+    if not request.app.state.scenes.rename(
+        scene_id, req.name.strip(), workspace_id=_workspace(request),
+    ):
         raise HTTPException(status_code=404, detail="scene not found")
     return {"ok": True}
 
 
 @router.delete("/{scene_id}")
 async def delete_scene(scene_id: str, request: Request) -> dict[str, bool]:
-    if not request.app.state.scenes.delete(scene_id):
+    if not request.app.state.scenes.delete(scene_id, workspace_id=_workspace(request)):
         raise HTTPException(status_code=404, detail="scene not found")
     return {"ok": True}
 
@@ -132,7 +150,7 @@ def _safe_filename(name: str) -> str:
 @router.get("/{scene_id}/export")
 async def export_scene(scene_id: str, request: Request) -> Response:
     """Return a .relight.zip with scene.json + source image + thumb."""
-    scene = request.app.state.scenes.get(scene_id)
+    scene = request.app.state.scenes.get(scene_id, workspace_id=_workspace(request))
     if scene is None:
         raise HTTPException(status_code=404, detail="scene not found")
     sessions = request.app.state.sessions
@@ -211,4 +229,5 @@ async def import_scene(
         name=name,
         session_id=prepared.session_id,
         state=state,
+        workspace_id=_workspace(request),
     )

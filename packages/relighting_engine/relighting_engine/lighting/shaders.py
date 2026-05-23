@@ -172,22 +172,36 @@ def render(
     lights: Sequence[Light],
     ambient: float = 0.2,
     *,
+    ambient_subject: float | None = None,
+    ambient_background: float | None = None,
     device: str = "cuda",
     gobo_textures: dict[str, torch.Tensor] | None = None,
     shadow_style: str = "off",          # 'off' | 'heightfield' | 'planar'
 ) -> np.ndarray:
-    """Render the prepared image under the given lights. Returns (H, W, 3) float32 in [0, 1]."""
+    """Render the prepared image under the given lights. Returns (H, W, 3) float32 in [0, 1].
+
+    Per-zone ambient: pass `ambient_subject` / `ambient_background` to bias
+    ambient by mask (e.g. to darken just the background). When either is None
+    the global `ambient` value is used for that zone.
+    """
     h, w = prepared.height, prepared.width
     original = torch.from_numpy(prepared.original).to(device)
     depth = torch.from_numpy(prepared.depth).to(device)
     normals = torch.from_numpy(prepared.normals).to(device)
-    if prepared.mask is not None:
+    has_mask = prepared.mask is not None
+    if has_mask:
         mask = torch.from_numpy(prepared.mask).to(device)
     else:
         mask = torch.ones((h, w), device=device, dtype=torch.float32)
 
     P = _make_world_pos(h, w, depth)
-    total = ambient * original
+    a_subj = ambient_subject if ambient_subject is not None else ambient
+    a_bg   = ambient_background if ambient_background is not None else ambient
+    if has_mask and (a_subj != ambient or a_bg != ambient):
+        a_map = a_subj * mask + a_bg * (1.0 - mask)
+        total = a_map.unsqueeze(-1) * original
+    else:
+        total = ambient * original
 
     # Split lights into regular emitters and reflectors for two-stage processing.
     emitters   = [L for L in lights if L.type != 'reflector']

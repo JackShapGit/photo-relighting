@@ -146,9 +146,13 @@ class RelightingEngine:
         ambient: float = 0.2,
         output_resolution: tuple[int, int] | None = None,
         shadow_style: str = "off",
+        ambient_subject: float | None = None,
+        ambient_background: float | None = None,
     ) -> np.ndarray:
         out = shader_render(
             prepared, lights, ambient=ambient,
+            ambient_subject=ambient_subject,
+            ambient_background=ambient_background,
             device=self.device, gobo_textures=self._gobos(),
             shadow_style=shadow_style,
         )
@@ -164,6 +168,8 @@ class RelightingEngine:
         lights: Sequence[Light],
         *,
         ambient: float = 0.2,
+        ambient_subject: float | None = None,
+        ambient_background: float | None = None,
         shadow_style: str = "off",
         prompt: str = "",
         seed: int | None = None,
@@ -176,6 +182,8 @@ class RelightingEngine:
         """
         classical = self.render(
             prepared, lights, ambient=ambient,
+            ambient_subject=ambient_subject,
+            ambient_background=ambient_background,
             output_resolution=None, shadow_style=shadow_style,
         )
 
