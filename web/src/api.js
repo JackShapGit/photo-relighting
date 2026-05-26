@@ -38,6 +38,19 @@ export async function render(body) {
   return r.blob();
 }
 
+export async function renderLayers(body) {
+  const r = await fetch('/render/layers', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`/render/layers: ${r.status}`);
+  const cd = r.headers.get('content-disposition') || '';
+  const m = cd.match(/filename="?([^"]+)"?/i);
+  const filename = m ? m[1] : 'relighting_export.psd';
+  return { blob: await r.blob(), filename };
+}
+
 export async function listGobos() {
   const r = await fetch('/gobos');
   if (!r.ok) throw new Error(`/gobos: ${r.status}`);

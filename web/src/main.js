@@ -6,7 +6,7 @@ import {
   loadScene3D, mount3D, refreshPointCloudColor, syncLightsToScene,
 } from './3d/index.js';
 import {
-  prepare, listGobos, render as serverRender,
+  prepare, listGobos, render as serverRender, renderLayers,
   listScenes, getScene, createScene, updateScene, renameScene,
   refineMask, getCapabilities, currentWorkspace,
 } from './api.js';
@@ -299,6 +299,9 @@ async function setupPolishUI() {
     caps = await getCapabilities();
   } catch {
     caps = { polish: false };
+  }
+  if (caps.layers_export) {
+    document.getElementById('export-layers-btn').hidden = false;
   }
   if (!caps.polish) {
     controls?.remove();
@@ -638,6 +641,37 @@ document.getElementById('export-btn').addEventListener('click', async () => {
   a.download = `${(state.sceneName || 'scene').replace(/[^\w-]+/g, '_')}-${Date.now()}.png`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+});
+
+document.getElementById('export-layers-btn').addEventListener('click', async () => {
+  if (!state.sessionId) return;
+  const btn = document.getElementById('export-layers-btn');
+  const origText = btn.textContent;
+  btn.textContent = 'Exporting...';
+  btn.disabled = true;
+  try {
+    const body = {
+      session_id: state.sessionId,
+      lights: state.lights,
+      ambient: state.ambient,
+      ambient_subject: state.ambientLinked === false ? state.ambientSubject : null,
+      ambient_background: state.ambientLinked === false ? state.ambientBackground : null,
+      shadow_style: state.shadowStyle || 'off',
+      scene_name: state.sceneName || '',
+    };
+    const { blob, filename } = await renderLayers(body);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert(`PSD export failed:\n${err.message}`);
+  } finally {
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
 });
 
 // ─── + Light / + Group buttons in the tree pane header ───────────────────
