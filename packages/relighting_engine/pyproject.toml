@@ -35,6 +35,9 @@ diffusion = [
     "accelerate>=0.30",
     "safetensors>=0.4",
 ]
+layers = [
+    "pytoshop>=0.6",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
