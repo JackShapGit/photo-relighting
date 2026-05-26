@@ -37,6 +37,22 @@ class FakeEngine:
         self.last_shadow_style = shadow_style
         return np.full((prepared.height, prepared.width, 3), 0.5, dtype=np.float32)
 
+    def render_layers(
+        self, prepared, lights, ambient=0.2,
+        ambient_subject=None, ambient_background=None,
+        shadow_style="off", output_resolution=None,
+    ) -> dict[str, np.ndarray]:
+        self.last_lights = list(lights)
+        self.last_ambient = ambient
+        h = output_resolution[1] if output_resolution else prepared.height
+        w = output_resolution[0] if output_resolution else prepared.width
+        result = {"Ambient": np.full((h, w, 3), 0.3, dtype=np.float32)}
+        for i, L in enumerate(lights):
+            if L.enabled:
+                name = getattr(L, "name", "") or f"Light {i+1}"
+                result[name] = np.full((h, w, 3), 0.2, dtype=np.float32)
+        return result
+
     def polish(
         self, prepared, lights, *, ambient=0.2,
         ambient_subject=None, ambient_background=None,
