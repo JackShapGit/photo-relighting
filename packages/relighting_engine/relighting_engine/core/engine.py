@@ -15,6 +15,7 @@ from relighting_engine.core.prepared import PreparedImage
 from relighting_engine.depth.depth_anything import DepthAnythingBackend
 from relighting_engine.lighting.models import Light
 from relighting_engine.lighting.shaders import render as shader_render
+from relighting_engine.lighting.psd import deduplicate_names
 from relighting_engine.normals.from_depth import normals_from_depth
 from relighting_engine.polish.backend import PolishBackend
 from relighting_engine.segmentation.rmbg import RMBGBackend
@@ -161,6 +162,76 @@ class RelightingEngine:
             tw, th = output_resolution
             out = cv2.resize(out, (tw, th), interpolation=cv2.INTER_LINEAR)
         return out
+
+    def render_layers(
+        self,
+        prepared: PreparedImage,
+        lights: Sequence[Light],
+        ambient: float = 0.2,
+        ambient_subject: float | None = None,
+        ambient_background: float | None = None,
+        shadow_style: str = "off",
+        output_resolution: tuple[int, int] | None = None,
+    ) -> dict[str, np.ndarray]:
+        """Render each enabled light as a separate layer."""
+        gobos = self._gobos()
+
+        # 1. Ambient base: render with no lights.
+        ambient_layer = shader_render(
+            prepared, [], ambient=ambient,
+            ambient_subject=ambient_subject,
+            ambient_background=ambient_background,
+            device=self.device, gobo_textures=gobos,
+            shadow_style=shadow_style,
+        )
+
+        enabled = [L for L in lights if L.enabled]
+        emitters = [L for L in enabled if L.type != "reflector"]
+        reflectors = [L for L in enabled if L.type == "reflector"]
+
+        raw_names = [L.name or f"{L.type.title()} Light" for L in enabled]
+        deduped = deduplicate_names(raw_names)
+
+        layers: dict[str, np.ndarray] = {"Ambient": ambient_layer}
+
+        # 2. Per-emitter layers.
+        for L, name in zip(emitters, deduped[:len(emitters)]):
+            layer = shader_render(
+                prepared, [L], ambient=0.0,
+                ambient_subject=0.0, ambient_background=0.0,
+                device=self.device, gobo_textures=gobos,
+                shadow_style=shadow_style,
+            )
+            layers[name] = layer
+
+        # 3. Per-reflector layers: isolate net reflector contribution.
+        if reflectors:
+            emitter_only = shader_render(
+                prepared, emitters, ambient=0.0,
+                ambient_subject=0.0, ambient_background=0.0,
+                device=self.device, gobo_textures=gobos,
+                shadow_style=shadow_style,
+            )
+            for R, name in zip(reflectors, deduped[len(emitters):]):
+                with_refl = shader_render(
+                    prepared, emitters + [R], ambient=0.0,
+                    ambient_subject=0.0, ambient_background=0.0,
+                    device=self.device, gobo_textures=gobos,
+                    shadow_style=shadow_style,
+                )
+                layer = np.clip(with_refl - emitter_only, 0.0, 1.0)
+                layers[name] = layer
+
+        # 4. Resize all layers if requested.
+        if output_resolution is not None:
+            import cv2
+            tw, th = output_resolution
+            layers = {
+                k: cv2.resize(v, (tw, th), interpolation=cv2.INTER_LINEAR)
+                for k, v in layers.items()
+            }
+
+        return layers
 
     def polish(
         self,

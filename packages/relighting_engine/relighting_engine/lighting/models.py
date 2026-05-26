@@ -54,6 +54,7 @@ class Light:
     gobo: Gobo | None = None
     affects: Affects = "all"
     enabled: bool = True
+    name: str = ""
 
     # Reflector-only fields (ignored for non-reflector types).
     normal: tuple[float, float, float] = (0.0, 0.0, -1.0)
@@ -110,6 +111,7 @@ class Light:
             gobo=gobo,
             affects=d.get("affects", "all"),
             enabled=bool(d.get("enabled", True)),
+            name=d.get('name', ''),
             normal=tuple(d.get('normal', (0.0, 0.0, -1.0))),
             size=tuple(d.get('size', (0.6, 0.4))),
             reflectance=float(d.get('reflectance', 0.7)),

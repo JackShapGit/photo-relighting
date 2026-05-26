@@ -45,6 +45,7 @@ class LightModel(BaseModel):
     gobo: GoboModel | None = None
     affects: Literal["all", "subject", "background"] = "all"
     enabled: bool = True
+    name: str = ""
     normal: list[float] = Field(default_factory=lambda: [0.0, 0.0, -1.0])
     size: list[float] = Field(default_factory=lambda: [0.6, 0.4])
     reflectance: Annotated[float, Field(ge=0.0, le=1.0)] = 0.7
@@ -65,6 +66,7 @@ class LightModel(BaseModel):
             gobo=self.gobo.to_engine() if self.gobo else None,
             affects=self.affects,
             enabled=self.enabled,
+            name=self.name,
             normal=(self.normal[0], self.normal[1], self.normal[2]),
             size=(self.size[0], self.size[1]),
             reflectance=self.reflectance,
