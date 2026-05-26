@@ -108,12 +108,13 @@ def assemble_psd(
     psd = pytoshop.PsdFile(num_channels=3, height=h, width=w)
     psd.depth = 16
 
-    # Optionally embed ICC profile
+    # Optionally embed ICC profile (resource ID 1039 = 0x040F)
     if icc_profile is not None:
         import pytoshop.image_resources as _IR  # noqa: PLC0415  (lazy import)
-        icc_res = _IR.ColorProfileResource()
-        icc_res.data = icc_profile
-        psd.image_resources.append(icc_res)
+        icc_res = _IR.GenericImageResourceBlock(
+            name="", resource_id=1039, data=icc_profile,
+        )
+        psd.image_resources._blocks.append(icc_res)
 
     # Accumulator for composite (sum, then clamp)
     composite_f = np.zeros((h, w, 3), dtype=np.float32)

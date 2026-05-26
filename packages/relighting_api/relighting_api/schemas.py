@@ -111,6 +111,18 @@ class PolishRequest(RenderCommon):
     seed: int | None = None
 
 
+class RenderLayersRequest(BaseModel):
+    """POST /render/layers body. Always outputs 16-bit PSD."""
+    session_id: str
+    lights: list[LightModel] = Field(default_factory=list)
+    ambient: Annotated[float, Field(ge=0.0)] = 0.2
+    ambient_subject: Annotated[float | None, Field(ge=0.0)] = None
+    ambient_background: Annotated[float | None, Field(ge=0.0)] = None
+    shadow_style: Literal["off", "heightfield", "planar"] = "off"
+    output_resolution: list[int] | None = None
+    scene_name: str = ""
+
+
 class GoboPreset(BaseModel):
     gobo_id: str
     name: str
@@ -142,6 +154,7 @@ class PrepareResponse(BaseModel):
 
 class Capabilities(BaseModel):
     polish: bool = False
+    layers_export: bool = False
     segmenters: list[str] = Field(default_factory=list)
 
 

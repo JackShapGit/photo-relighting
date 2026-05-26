@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from relighting_api import auth
 from relighting_api.routes import gobos as gobos_route
 from relighting_api.routes import health as health_route
+from relighting_api.routes import layers as layers_route
 from relighting_api.routes import polish as polish_route
 from relighting_api.routes import prepare as prepare_route
 from relighting_api.routes import refine as refine_route
@@ -40,8 +41,15 @@ def create_app(skip_engine: bool = False) -> FastAPI:
             polish_available = is_available()
         except ImportError:
             polish_available = False
+    layers_available = False
+    try:
+        import pytoshop  # noqa: F401
+        layers_available = True
+    except ImportError:
+        layers_available = False
     app.state.capabilities = {
         "polish": polish_available,
+        "layers_export": layers_available,
         "segmenters": ["rmbg", "sam2"],
     }
 
@@ -53,6 +61,7 @@ def create_app(skip_engine: bool = False) -> FastAPI:
     app.include_router(prepare_route.router)
     app.include_router(refine_route.router)
     app.include_router(render_route.router)
+    app.include_router(layers_route.router)
     app.include_router(scenes_route.router)
     app.include_router(session_route.router)
 

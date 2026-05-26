@@ -15,6 +15,7 @@ def healthz(request: Request) -> HealthResponse:
     caps_dict = getattr(request.app.state, "capabilities", {}) or {}
     caps = Capabilities(
         polish=bool(caps_dict.get("polish", False)),
+        layers_export=bool(caps_dict.get("layers_export", False)),
         segmenters=list(caps_dict.get("segmenters", [])),
     )
     return HealthResponse(
