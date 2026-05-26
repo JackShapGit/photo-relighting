@@ -12,7 +12,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("RELIGHT_CACHE_DIR", str(tmp_path / "sessions"))
     monkeypatch.setenv("RELIGHT_SCENES_DB", str(tmp_path / "scenes.db"))
     app = create_app(skip_engine=True)
-    app.state.capabilities = {"polish": True, "segmenters": ["rmbg", "sam2"]}
+    app.state.capabilities = {"polish": True, "layers_export": True, "segmenters": ["rmbg", "sam2"]}
     return TestClient(app)
 
 
@@ -30,3 +30,11 @@ def test_healthz_capabilities_polish_false_when_disabled(client):
     r = client.get("/healthz")
     body = r.json()
     assert body["capabilities"]["polish"] is False
+
+
+def test_healthz_reports_layers_export(client):
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    body = r.json()
+    assert "layers_export" in body["capabilities"]
+    assert body["capabilities"]["layers_export"] is True
