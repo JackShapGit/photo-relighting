@@ -96,6 +96,13 @@ Edit `.env.demo` and paste the password after `RELIGHT_DEMO_PASSWORD=`.
 To rotate later, edit `.env.demo` and restart the app (`start-demo.bat`).
 No tunnel restart needed.
 
+> ⚠️ **Never run the tunnel with `RELIGHT_DEMO_PASSWORD` empty.** An empty (or
+> unset) value disables auth entirely — the middleware is not installed, so
+> anyone with the URL reaches the app and your GPU. An empty password is *only*
+> for local-bound dev (e.g. `run_noauth.bat`), never for tunnel-facing use.
+> Making the repo public does not expose the password (it lives only in the
+> gitignored `.env.demo`); the tunnel is the real risk surface.
+
 ### Launch a demo
 
 ```powershell
