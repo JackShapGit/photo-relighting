@@ -3,6 +3,24 @@
 Controllable, depth-based, classical relighting for 2D photos.
 Engine in Python (PyTorch) + FastAPI service + WebGL playground.
 
+## Features
+
+- **Classical relighting engine** — depth- and normal-aware, per-light
+  contribution composited in linear space (point / directional / spot lights,
+  Kelvin colour, cones, softness, falloff, gobos).
+- **Reflectors** — diffuse + glossy plane primitives that bounce light into the
+  scene, with per-pixel contribution matched between the Python engine and GLSL.
+- **3D viewport** — optional Three.js pane showing a depth-displaced point cloud
+  of the photo with draggable 3D light gizmos, kept in sync with the 2D canvas.
+- **Layered PSD export** — decompose the result into per-light layers and
+  download a Photoshop-ready `.psd` (capability-gated, requires `pytoshop`).
+- **IC-Light polish** — optional diffusion refinement pass on top of the
+  classical render.
+- **Portable scenes** — auto-saved lighting trees, importable/exportable as
+  `.relight.zip`.
+- **Shared-password demo mode** — Basic Auth middleware for exposing a demo over
+  a Cloudflare tunnel (see `docs/deployment/cloudflare-tunnel.md`).
+
 See `docs/superpowers/specs/2026-04-30-photo-relighting-mvp-design.md`
 for the full design and `docs/superpowers/plans/2026-05-01-photo-relighting-mvp-plan.md`
 for the implementation plan that produced this codebase.
@@ -116,3 +134,23 @@ cache/                        gitignored; per-session prepared assets
 ## Out of scope (MVP)
 
 See `docs/superpowers/specs/2026-04-30-photo-relighting-future-work.md`.
+
+## Third-party models
+
+This project's **code** is Apache-2.0 licensed (below), but it downloads and
+runs third-party model weights at runtime, each under its own license. You are
+responsible for complying with these — some are **non-commercial** and/or
+require accepting terms before download:
+
+- **RMBG-2.0** (background removal, BriaAI) — gated on Hugging Face; the weights
+  are non-commercial. Accept the license at <https://huggingface.co/briaai/RMBG-2.0>.
+- **Depth-Anything** — see its upstream repository for license terms.
+- **IC-Light** (optional polish pass) — see its upstream repository.
+
+No model weights are bundled in this repository.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+
+Copyright 2026 Jack Shapiro.
