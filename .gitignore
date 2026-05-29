@@ -20,6 +20,10 @@ test-results/
 playwright-report/
 .env.demo
 
+# Generated artifacts (report PDF, smoke-test output images)
+photo_relighting_report.pdf
+scripts/*_smoke*.png
+
 # OS
 .DS_Store
 Thumbs.db
