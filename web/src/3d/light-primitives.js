@@ -10,6 +10,7 @@
  */
 import * as THREE from 'three';
 import { directionToWorld, lightToWorld } from './coords.js';
+import { rgbToHex } from './utils.js';
 
 const SPHERE_RADIUS = 0.05;
 const HIT_RADIUS = SPHERE_RADIUS * 3;
@@ -206,11 +207,4 @@ export function disposeLightPrimitive(prim) {
     prim._planeBack.material.dispose();
   }
   if (prim.group.parent) prim.group.parent.remove(prim.group);
-}
-
-function rgbToHex(rgb) {
-  const r = Math.round(Math.min(1, Math.max(0, rgb[0])) * 255);
-  const g = Math.round(Math.min(1, Math.max(0, rgb[1])) * 255);
-  const b = Math.round(Math.min(1, Math.max(0, rgb[2])) * 255);
-  return (r << 16) | (g << 8) | b;
 }

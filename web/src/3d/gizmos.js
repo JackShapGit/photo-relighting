@@ -86,13 +86,14 @@ export function createGizmo({ camera, canvas, orbitControls, scene, onTranslate,
     attachedKind = 'target';
     attachedTargetLightId = lightId;
     attachedPrimitive = markerObject;
-    gizmo.setMode('translate');
+    gizmo.setMode('translate');   // a target point can only be translated, never rotated
     gizmo.attach(markerObject);
   }
 
   function detach() {
     attachedLightId = null;
     attachedPrimitive = null;
+    attachedLightType = 'point';
     attachedKind = 'light';
     attachedTargetLightId = null;
     gizmo.detach();

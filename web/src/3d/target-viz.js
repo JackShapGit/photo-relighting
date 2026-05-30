@@ -6,6 +6,7 @@
  */
 import * as THREE from 'three';
 import { lightToWorld } from './coords.js';
+import { rgbToHex } from './utils.js';
 
 const MARKER_RADIUS = 0.04;
 
@@ -49,11 +50,4 @@ export function createTargetViz(scene) {
   }
 
   return { marker, show, hide, dispose };
-}
-
-function rgbToHex(rgb) {
-  const r = Math.round(Math.min(1, Math.max(0, rgb[0])) * 255);
-  const g = Math.round(Math.min(1, Math.max(0, rgb[1])) * 255);
-  const b = Math.round(Math.min(1, Math.max(0, rgb[2])) * 255);
-  return (r << 16) | (g << 8) | b;
 }
