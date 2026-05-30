@@ -131,7 +131,7 @@ const refreshProps = () => {
   if (state.selectedId === ADD_LIGHT_ID) {
     renderAddLightPicker(state, c, onPickPreset);
   } else {
-    renderProps(state, c, redrawAndSave);
+    renderProps(state, c, redrawAndSave, onChange);
   }
 };
 

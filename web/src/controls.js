@@ -8,6 +8,7 @@
 import { ensureGoboTexture } from './webgl/renderer.js';
 import { SCENE_ID, findNode } from './lights.js';
 import { PRESETS } from './presets.js';
+import { isTargeted, targetSpawnPoint, applyTargeting } from './targeting.js';
 
 const SLOT_VARS = ['--slot-key', '--slot-fill', '--slot-rim'];
 
@@ -40,7 +41,7 @@ export function setGoboPresets(presets) {
   goboPresets = presets;
 }
 
-export function renderProps(state, container, redraw) {
+export function renderProps(state, container, redraw, onStructural) {
   if (state.selectedId === SCENE_ID) {
     renderSceneProps(state, container, redraw);
     return;
@@ -55,7 +56,7 @@ export function renderProps(state, container, redraw) {
     return;
   }
   const idx = state.lights.indexOf(node);
-  renderLightProps(node, idx, container, redraw);
+  renderLightProps(node, idx, container, redraw, onStructural);
 }
 
 function renderGroupProps(G, container) {
@@ -208,7 +209,7 @@ function renderSceneProps(state, container, redraw) {
   });
 }
 
-function renderLightProps(L, slotIdx, container, redraw) {
+function renderLightProps(L, slotIdx, container, redraw, onStructural) {
   if (L.type === 'reflector') {
     renderReflectorProps(L, slotIdx, container, redraw);
     return;
@@ -217,6 +218,8 @@ function renderLightProps(L, slotIdx, container, redraw) {
     .concat(goboPresets.map((g) =>
       `<option value="${g.gobo_id}">${escapeHtml(g.name)}</option>`))
     .join('');
+
+  const canTarget = L.type === 'directional' || L.type === 'spotlight';
 
   container.innerHTML = `
     <div class="props-header">
@@ -232,6 +235,7 @@ function renderLightProps(L, slotIdx, container, redraw) {
     </label>
     <label>Position Z <input class="position-z" type="range" min="-2" max="3" step="0.05" /></label>
     <label>Direction Z <input class="direction-z" type="range" min="-1" max="1" step="0.02" /></label>
+    ${canTarget ? '<label class="checkbox-row"><input type="checkbox" class="aim-at-target" /> Aim at target</label>' : ''}
     <label>Intensity <input class="intensity" type="range" min="0" max="3" step="0.01" /></label>
     <label>Color <input class="color" type="color" /></label>
     <label>Kelvin <input class="kelvin" type="range" min="1500" max="10000" step="50" /></label>
@@ -254,6 +258,11 @@ function renderLightProps(L, slotIdx, container, redraw) {
   $('.type').value = L.type;
   $('.position-z').value = L.position[2];
   $('.direction-z').value = L.direction[2];
+  if (canTarget) {
+    const targeted = isTargeted(L);
+    $('.aim-at-target').checked = targeted;
+    $('.direction-z').disabled = targeted;   // direction is derived while targeted
+  }
   $('.intensity').value = L.intensity;
   $('.color').value = linearToHex(L.color);
   $('.kelvin').value = L.color_temperature ?? 5500;
@@ -270,6 +279,20 @@ function renderLightProps(L, slotIdx, container, redraw) {
   bind('.type', (t) => { L.type = t.value; });
   bind('.position-z', (t) => { L.position[2] = parseFloat(t.value); });
   bind('.direction-z', (t) => { L.direction[2] = parseFloat(t.value); });
+  if (canTarget) {
+    $('.aim-at-target').addEventListener('change', (e) => {
+      if (e.target.checked) {
+        L.target = targetSpawnPoint(L);   // spawn in front; beam won't jump
+        applyTargeting(L);                // derive (unchanged at spawn)
+      } else {
+        L.target = null;                  // back to free-aim; keep last direction
+      }
+      // direction is derived while targeted — disable its slider directly (onChange
+      // does not re-render the props panel, so we update this DOM in place).
+      $('.direction-z').disabled = e.target.checked;
+      if (onStructural) onStructural();   // remount 2D handles, sync 3D, save
+    });
+  }
   bind('.intensity', (t) => { L.intensity = parseFloat(t.value); });
   bind('.color', (t) => { L.color = hexToLinearRGB(t.value); L.color_temperature = null; });
   bind('.kelvin', (t) => { L.color_temperature = parseFloat(t.value); L.color = [1, 1, 1]; });
