@@ -99,7 +99,7 @@ export function createGizmo({ camera, canvas, orbitControls, scene, onTranslate,
   }
 
   function setMode(mode) {
-    if (mode === 'rotate' && attachedLightType === 'point') return;
+    if (mode === 'rotate' && (attachedKind === 'target' || attachedLightType === 'point')) return;
     gizmo.setMode(mode);
   }
 
