@@ -19,6 +19,7 @@ import {
 import { mountLightbox } from './polish-lightbox.js';
 import { init as initRenderer, setAssets, draw, reloadMaskTexture } from './webgl/renderer.js';
 import { mountHandles } from './handles.js';
+import { applyTargeting } from './targeting.js';
 import { renderProps, renderAddLightPicker, setGoboPresets } from './controls.js';
 import { mountTree } from './tree.js';
 import { initTheme } from './theme.js';
@@ -230,6 +231,9 @@ async function applyScene(scene) {
   state.subjectMedianDepth = typeof sm.subject_median_depth === 'number'
     ? sm.subject_median_depth : 0.3;
   syncLights(state);
+  // Recompute derived direction for any targeted lights (guards against a stale
+  // stored direction in the loaded scene).
+  for (const L of state.lights) applyTargeting(L);
   // 3D view picks up lights as soon as they're loaded.
   syncLightsToScene(state.lights, state.selectedId);
 
@@ -431,6 +435,10 @@ refreshProps();
       if (patch.position)  L.position  = patch.position;
       if (patch.direction) L.direction = patch.direction;
       if (patch.normal)    L.normal    = patch.normal;
+      if ('target' in patch) L.target = patch.target;
+      // Targeted lights derive direction from target - position; recompute after
+      // any target OR position change so the beam tracks live.
+      applyTargeting(L);
       onChange();
     },
   });
