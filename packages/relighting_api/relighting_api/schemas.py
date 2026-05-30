@@ -35,6 +35,7 @@ class LightModel(BaseModel):
     type: Literal["directional", "point", "spotlight", "reflector"]
     position: list[float] = Field(default_factory=lambda: [0.0, 0.0, -1.0])
     direction: list[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0])
+    target: list[float] | None = None
     color: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0])
     color_temperature: float | None = None
     gel_preset: str | None = None
@@ -56,6 +57,7 @@ class LightModel(BaseModel):
             type=self.type,
             position=(self.position[0], self.position[1], self.position[2]),
             direction=(self.direction[0], self.direction[1], self.direction[2]),
+            target=tuple(self.target) if self.target else None,
             color=(self.color[0], self.color[1], self.color[2]),
             color_temperature=self.color_temperature,
             gel_preset=self.gel_preset,
