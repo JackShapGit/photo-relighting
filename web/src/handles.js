@@ -152,6 +152,7 @@ export function mountHandles(state, redraw, onSelect) {
         Math.max(0, Math.min(1, startPos[1] + dy)),
         startPos[2],
       ];
+      applyTargeting(state.lights[i]);   // re-derive direction if this light is targeted
       place();
       redraw();
     });
@@ -163,6 +164,7 @@ export function mountHandles(state, redraw, onSelect) {
     el.addEventListener('wheel', (e) => {
       e.preventDefault();
       state.lights[i].position[2] += Math.sign(e.deltaY) * 0.05;
+      applyTargeting(state.lights[i]);   // re-derive direction if this light is targeted
       redraw();
     }, { passive: false });
   });
