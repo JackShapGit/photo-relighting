@@ -11,6 +11,8 @@
 //   - Drag direction-handle             → light.direction[0..1] (Z untouched)
 //   - Shift-drag on position-handle is no longer used (replaced by direction handle)
 
+import { isTargeted, applyTargeting } from './targeting.js';
+
 const SLOT_VARS = ['--slot-key', '--slot-fill', '--slot-rim'];
 const CLICK_THRESHOLD_PX = 3;
 const DIR_HANDLE_SCALE_PX = 60;     // distance from position to direction tip per unit direction
@@ -44,8 +46,41 @@ export function mountHandles(state, redraw, onSelect) {
   root.appendChild(dirLine);
   root.appendChild(dirHandle);
 
+  // Target handle — shown only for the selected, targeted light. Dragging it
+  // moves light.target in X/Y (Z unchanged); direction is re-derived live.
+  const tgtLine = document.createElement('div');
+  tgtLine.className = 'direction-line';        // reuse the tether styling
+  const tgtHandle = document.createElement('div');
+  tgtHandle.className = 'direction-handle target-handle';
+  tgtHandle.style.display = 'none';
+  tgtLine.style.display = 'none';
+  root.appendChild(tgtLine);
+  root.appendChild(tgtHandle);
+
   function selectedLight() {
     return state.lights.find((L) => L.id === state.selectedId);
+  }
+
+  function placeTarget(sel) {
+    if (!(sel && isTargeted(sel))) {
+      tgtHandle.style.display = 'none';
+      tgtLine.style.display = 'none';
+      return;
+    }
+    const r2 = root.getBoundingClientRect();
+    const lpx = sel.position[0] * r2.width;
+    const lpy = sel.position[1] * r2.height;
+    const tpx = sel.target[0] * r2.width;
+    const tpy = sel.target[1] * r2.height;
+    tgtHandle.style.left = `${tpx}px`;
+    tgtHandle.style.top  = `${tpy}px`;
+    tgtHandle.style.display = '';
+    const tdx = tpx - lpx, tdy = tpy - lpy;
+    tgtLine.style.left = `${lpx}px`;
+    tgtLine.style.top  = `${lpy}px`;
+    tgtLine.style.width = `${Math.hypot(tdx, tdy)}px`;
+    tgtLine.style.transform = `rotate(${Math.atan2(tdy, tdx) * 180 / Math.PI}deg)`;
+    tgtLine.style.display = '';
   }
 
   const place = () => {
@@ -62,10 +97,12 @@ export function mountHandles(state, redraw, onSelect) {
     // the handle based on type is a more confusing UI than letting the user
     // see it always.)
     const sel = selectedLight();
-    const showDir = sel && sel.enabled;
+    const targeted = sel && isTargeted(sel);
+    const showDir = sel && sel.enabled && !targeted;
     if (!showDir) {
       dirHandle.style.display = 'none';
       dirLine.style.display = 'none';
+      placeTarget(sel);
       return;
     }
     const px = sel.position[0] * r.width;
@@ -84,6 +121,7 @@ export function mountHandles(state, redraw, onSelect) {
     dirLine.style.width = `${len}px`;
     dirLine.style.transform = `rotate(${angle}deg)`;
     dirLine.style.display = '';
+    placeTarget(sel);
   };
   place();
   window.addEventListener('resize', place);
@@ -162,6 +200,36 @@ export function mountHandles(state, redraw, onSelect) {
     dirHandle.addEventListener('pointerup', (e) => {
       dirHandle.releasePointerCapture(e.pointerId);
       dirHandle.classList.remove('dragging');
+    });
+  }
+
+  // ─── Target-handle drag ────────────────────────────────────────────────
+  {
+    let startX = 0, startY = 0, startTarget = null;
+    tgtHandle.addEventListener('pointerdown', (e) => {
+      const sel = selectedLight();
+      if (!sel || !isTargeted(sel)) return;
+      e.stopPropagation();
+      tgtHandle.setPointerCapture(e.pointerId);
+      tgtHandle.classList.add('dragging');
+      startX = e.clientX; startY = e.clientY;
+      startTarget = sel.target.slice();
+    });
+    tgtHandle.addEventListener('pointermove', (e) => {
+      if (!tgtHandle.hasPointerCapture(e.pointerId)) return;
+      const sel = selectedLight();
+      if (!sel || !isTargeted(sel)) return;
+      const r = root.getBoundingClientRect();
+      const dx = (e.clientX - startX) / r.width;
+      const dy = (e.clientY - startY) / r.height;
+      sel.target = [startTarget[0] + dx, startTarget[1] + dy, startTarget[2]];
+      applyTargeting(sel);   // re-derive direction live
+      place();
+      redraw();
+    });
+    tgtHandle.addEventListener('pointerup', (e) => {
+      tgtHandle.releasePointerCapture(e.pointerId);
+      tgtHandle.classList.remove('dragging');
     });
   }
 
