@@ -59,7 +59,7 @@ def _planar_shadow(
 
     # Per-pixel ray direction (surface → light).
     if L.type == "directional":
-        d_vec = torch.tensor(L.direction, device=device, dtype=torch.float32)
+        d_vec = torch.tensor(effective_direction(L), device=device, dtype=torch.float32)
         d_vec = d_vec / (d_vec.norm() + 1e-8)
         Rx = torch.full((h, w), float(-d_vec[0]), device=device)
         Ry = torch.full((h, w), float(-d_vec[1]), device=device)
