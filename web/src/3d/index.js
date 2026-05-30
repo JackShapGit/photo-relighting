@@ -9,6 +9,8 @@ import { createScene3D } from './scene.js';
 import { applyOps, diffLights, setSelected } from './sync.js';
 import { createGizmo } from './gizmos.js';
 import { bindHotkeys } from './hotkeys.js';
+import { isTargeted } from '../targeting.js';
+import { createTargetViz } from './target-viz.js';
 
 let api = null;
 let currentPointCloud = null;
@@ -16,6 +18,7 @@ const primitives = new Map();
 let prevLights = [];
 let onLightSelected = null;
 let gizmoApi = null;
+let targetViz = null;
 let onLightChange = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -72,7 +75,11 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
     onRotate: (id, vec, field) => {
       if (onLightChange) onLightChange(id, { [field]: vec });
     },
+    onTargetMove: (id, pos) => {
+      if (onLightChange) onLightChange(id, { target: pos });
+    },
   });
+  targetViz = createTargetViz(api.scene);
 
   bindHotkeys({ api, gizmoApi });
 
@@ -106,14 +113,20 @@ export function syncLightsToScene(lights, selectedId) {
   setSelected(primitives, selectedId);
   prevLights = lights.map((l) => structuredClone(l));
 
-  // Attach gizmo to the selected light's primitive (if any).
+  // Attach gizmo to the selected light — or to its target marker when targeted.
   if (gizmoApi) {
     const selectedPrim = selectedId ? primitives.get(selectedId) : null;
     const selectedLight = lights.find((l) => l.id === selectedId);
-    if (selectedPrim && selectedLight) {
-      gizmoApi.attach(selectedPrim, selectedLight.type);
+    if (selectedLight && isTargeted(selectedLight) && targetViz) {
+      targetViz.show(selectedLight);
+      gizmoApi.attachTarget(targetViz.marker, selectedLight.id);
     } else {
-      gizmoApi.detach();
+      if (targetViz) targetViz.hide();
+      if (selectedPrim && selectedLight) {
+        gizmoApi.attach(selectedPrim, selectedLight.type);
+      } else {
+        gizmoApi.detach();
+      }
     }
   }
 }
@@ -122,6 +135,7 @@ export async function loadScene3D({ assetUrls }) {
   if (!api) return;
   // Detach any in-flight gizmo before primitives go away.
   gizmoApi?.detach();
+  if (targetViz) targetViz.hide();
   // Dispose old cloud + primitives (new scene = different subject).
   if (currentPointCloud) {
     disposePointCloud(currentPointCloud);
@@ -153,6 +167,7 @@ export function refreshPointCloudColor() {
 export function dispose3D() {
   if (!api) return;
   if (gizmoApi) { gizmoApi.dispose(); gizmoApi = null; }
+  if (targetViz) { targetViz.dispose(); targetViz = null; }
   if (currentPointCloud) disposePointCloud(currentPointCloud);
   for (const p of primitives.values()) disposeLightPrimitive(p);
   primitives.clear();
