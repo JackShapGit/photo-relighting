@@ -167,6 +167,25 @@ def _sample_gobo_texture(uv: torch.Tensor, tex: torch.Tensor, blur: float = 0.0)
     return g
 
 
+def effective_direction(light) -> tuple[float, float, float]:
+    """Direction a directional/spotlight actually points.
+
+    If `light.target` is set, derive `normalize(target - position)`. Falls back
+    to the stored `light.direction` when no target is set or when target
+    coincides with position (degenerate). The web client sends an already-derived
+    direction; this lets direct API callers send a bare target instead.
+    """
+    target = getattr(light, "target", None)
+    if target is not None:
+        tx, ty, tz = target
+        px, py, pz = light.position
+        vx, vy, vz = tx - px, ty - py, tz - pz
+        n = math.sqrt(vx * vx + vy * vy + vz * vz)
+        if n > 1e-9:
+            return (vx / n, vy / n, vz / n)
+    return light.direction
+
+
 def render(
     prepared: PreparedImage,
     lights: Sequence[Light],
@@ -222,9 +241,10 @@ def render(
         if not L.enabled:
             continue
         L.validate()
+        dir_vec = effective_direction(L)
 
         if L.type == "directional":
-            d = torch.tensor(L.direction, device=device, dtype=torch.float32)
+            d = torch.tensor(dir_vec, device=device, dtype=torch.float32)
             d = d / (d.norm() + 1e-8)
             L_vec = -d.expand_as(P)
             atten = torch.ones((h, w), device=device, dtype=torch.float32)
@@ -236,7 +256,7 @@ def render(
             atten = 1.0 / (1.0 + L.falloff * (dist.squeeze(-1) ** 2))
 
         if L.type == "spotlight":
-            d = torch.tensor(L.direction, device=device, dtype=torch.float32)
+            d = torch.tensor(dir_vec, device=device, dtype=torch.float32)
             d = d / (d.norm() + 1e-8)
             cone_dot = (d * (-L_vec)).sum(dim=-1)
             inner = math.cos(max(L.cone_angle - L.softness * 0.5, 1e-4))

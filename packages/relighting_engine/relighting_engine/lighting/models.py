@@ -44,6 +44,7 @@ class Light:
     type: Literal['directional', 'point', 'spotlight', 'reflector']
     position: tuple[float, float, float] = (0.0, 0.0, -1.0)
     direction: tuple[float, float, float] = (0.0, 0.0, 1.0)
+    target: tuple[float, float, float] | None = None
     color: tuple[float, float, float] = (1.0, 1.0, 1.0)
     color_temperature: float | None = None
     gel_preset: str | None = None
@@ -91,6 +92,7 @@ class Light:
         d["position"] = list(self.position)
         d["direction"] = list(self.direction)
         d["color"] = list(self.color)
+        d["target"] = list(self.target) if self.target is not None else None
         d["gobo"] = self.gobo.to_dict() if self.gobo else None
         return d
 
@@ -101,6 +103,7 @@ class Light:
             type=d["type"],
             position=tuple(d.get("position", (0.0, 0.0, -1.0))),
             direction=tuple(d.get("direction", (0.0, 0.0, 1.0))),
+            target=tuple(d["target"]) if d.get("target") else None,
             color=tuple(d.get("color", (1.0, 1.0, 1.0))),
             color_temperature=d.get("color_temperature"),
             gel_preset=d.get("gel_preset"),
