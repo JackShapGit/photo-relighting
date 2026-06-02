@@ -35,7 +35,7 @@ let tree = null;
 let handlesAPI = null;
 let depthSampler = null;     // rebuilt on each scene load; used by 2D placement
 let placement = null;        // created once below
-let placement2D = null;      // set in Task 4 (2D pane adapter)
+let placement2D = null;      // 2D pane placement adapter (assigned below)
 // Suppress auto-save until the initial scene has been loaded — otherwise the
 // default in-memory state would overwrite the just-loaded scene's data on
 // the very first change. Set true at the end of applyScene().
@@ -207,6 +207,7 @@ function onPickPreset(preset) {
     return;
   }
   const insertAt = pendingAddLight || { parentArr: state.tree, index: state.tree.length };
+  const prevSelection = lastSelectedBeforePicker;   // remember what was selected before the picker
   const L = lightFromPreset(preset);
   L.name = uniqueName(preset.name);
   pendingAddLight = null;
@@ -214,8 +215,10 @@ function onPickPreset(preset) {
 
   const placeable = L.type === 'directional' || L.type === 'spotlight' || L.type === 'point';
   if (placeable && placement && state.assetUrls) {
-    // Enter click-to-place. The light is committed on the first click.
-    state.selectedId = SCENE_ID;     // dismiss the picker; show scene props meanwhile
+    // Enter click-to-place. Keep the prior selection so dismissing the picker
+    // shows something sensible and a cancel-before-first-click returns to it.
+    // The first click commits the new light and selects it.
+    state.selectedId = prevSelection || state.tree[0]?.id || SCENE_ID;
     tree?.render();
     refreshProps();
     placement.begin(L, insertAt);
