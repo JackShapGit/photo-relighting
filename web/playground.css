@@ -894,6 +894,22 @@ button.refine-toggle.active {
 
 .stage-divider[hidden] { display: none !important; }
 
+/* ─── Placement overlay (click-to-place lights) ────────────────────────── */
+#placement-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;                 /* above handles while placing */
+  cursor: crosshair;
+}
+#placement-overlay[hidden] { display: none; }
+#placement-overlay .placement-tether {
+  position: absolute;
+  height: 0;
+  border-top: 1px dashed #ffd23f;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
 /* ─── Reflector anchor ─────────────────────────────────────────────────── */
 
 .handle.handle--reflector {

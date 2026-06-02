@@ -28,6 +28,7 @@ import { mountTree } from './tree.js';
 import { initTheme } from './theme.js';
 import { openNewScenePopup } from './new-scene-popup.js';
 import { openScenesListModal } from './scenes-list-modal.js';
+import { mountPlacement2D } from './placement-pane-2d.js';
 
 const state = newState();
 let tree = null;
@@ -183,6 +184,12 @@ placement = createPlacement({
   updateLight: updatePlacedLight,
   removeLight: removePlacedLight,
   onPhaseChange: onPlacementPhase,
+});
+
+placement2D = mountPlacement2D({
+  overlayEl: document.getElementById('placement-overlay'),
+  controller: placement,
+  getSampler: () => depthSampler,
 });
 
 function onRequestAddLight({ parentArr, index }) {
