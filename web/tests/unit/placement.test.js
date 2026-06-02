@@ -87,3 +87,16 @@ test('position z is clamped to the slider range [-2, 3]', () => {
   ctl.acceptSurfacePoint([0, 0, 5]);
   assert.ok(close(L.position[2], 3));
 });
+
+test('begin while a committed placement is in flight cancels (removes) the prior light', () => {
+  const { ctl, calls } = makeCtl();
+  const L1 = spotlight();
+  ctl.begin(L1, { parentArr: [], index: 0 });
+  ctl.acceptSurfacePoint([0.5, 0.5, 0.5]);   // L1 committed, now awaitingTarget
+  const L2 = spotlight();
+  ctl.begin(L2, { parentArr: [], index: 0 }); // should cancel L1 first
+  assert.equal(calls.remove.length, 1);
+  assert.equal(calls.remove[0], L1);
+  assert.equal(ctl.phase(), 'awaitingLight');
+  assert.equal(ctl.pendingLight(), L2);
+});

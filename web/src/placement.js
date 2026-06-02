@@ -33,7 +33,10 @@ export function createPlacement({ commitLight, updateLight, removeLight, onPhase
   }
 
   // Start placing a (not-yet-inserted) light. `where` = { parentArr, index }.
+  // Defensively cancels any in-flight placement first so a second begin() never
+  // orphans a previously-committed light.
   function begin(newLight, where) {
+    if (phase !== 'idle') cancel();
     light = newLight;
     insertAt = where;
     committed = false;
