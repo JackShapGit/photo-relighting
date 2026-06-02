@@ -1,7 +1,10 @@
 import {
   newState, newLightNode, newGroupNode, syncLights,
   ADD_LIGHT_ID, lightFromPreset, defaultSceneState,
+  deleteNode, SCENE_ID,
 } from './lights.js';
+import { createPlacement } from './placement.js';
+import { createDepthSampler } from './depth-sampler.js';
 import {
   loadScene3D, mount3D, refreshPointCloudColor, syncLightsToScene,
 } from './3d/index.js';
@@ -29,6 +32,13 @@ import { openScenesListModal } from './scenes-list-modal.js';
 const state = newState();
 let tree = null;
 let handlesAPI = null;
+let depthSampler = null;     // rebuilt on each scene load; used by 2D placement
+let placement = null;        // created once below
+let placement2D = null;      // set in Task 4 (2D pane adapter)
+// Replaced by a real import in Task 5; shim keeps the app running until then.
+const notifyPlacementPhase3D = (phase) => {
+  if (window.__notifyPlacementPhase3D) window.__notifyPlacementPhase3D(phase);
+};
 // Suppress auto-save until the initial scene has been loaded — otherwise the
 // default in-memory state would overwrite the just-loaded scene's data on
 // the very first change. Set true at the end of applyScene().
@@ -135,6 +145,46 @@ const refreshProps = () => {
   }
 };
 
+function commitPlacedLight(L, insertAt) {
+  const where = insertAt || { parentArr: state.tree, index: state.tree.length };
+  where.parentArr.splice(where.index, 0, L);
+  state.selectedId = L.id;
+  tree?.render();
+  refreshProps();
+  onChange();
+}
+
+function updatePlacedLight(L) {
+  // Direction already derived by the controller; refresh props so the targeting
+  // toggle reflects the new target, then sync + save.
+  refreshProps();
+  onChange();
+}
+
+function removePlacedLight(L) {
+  deleteNode(state.tree, L.id);
+  syncLights(state);
+  if (state.selectedId === L.id) state.selectedId = state.tree[0]?.id || SCENE_ID;
+  tree?.render();
+  refreshProps();
+  onChange();
+}
+
+function onPlacementPhase(phase) {
+  if (phase === 'awaitingLight') setStatus('Click in the photo or 3D view to place the light');
+  else if (phase === 'awaitingTarget') setStatus('Click where the light should aim (Esc to cancel)');
+  else setStatus('');
+  placement2D?.setPhase(phase);
+  notifyPlacementPhase3D(phase);
+}
+
+placement = createPlacement({
+  commitLight: commitPlacedLight,
+  updateLight: updatePlacedLight,
+  removeLight: removePlacedLight,
+  onPhaseChange: onPlacementPhase,
+});
+
 function onRequestAddLight({ parentArr, index }) {
   pendingAddLight = { parentArr, index };
   lastSelectedBeforePicker = state.selectedId;
@@ -147,18 +197,30 @@ function onPickPreset(preset) {
   if (!preset) {
     // Cancel — restore previous selection.
     pendingAddLight = null;
-    state.selectedId = lastSelectedBeforePicker || state.tree[0]?.id || '__scene__';
+    state.selectedId = lastSelectedBeforePicker || state.tree[0]?.id || SCENE_ID;
     lastSelectedBeforePicker = null;
     tree?.render();
     refreshProps();
     return;
   }
-  const target = pendingAddLight || { parentArr: state.tree, index: state.tree.length };
+  const insertAt = pendingAddLight || { parentArr: state.tree, index: state.tree.length };
   const L = lightFromPreset(preset);
   L.name = uniqueName(preset.name);
-  target.parentArr.splice(target.index, 0, L);
   pendingAddLight = null;
   lastSelectedBeforePicker = null;
+
+  const placeable = L.type === 'directional' || L.type === 'spotlight' || L.type === 'point';
+  if (placeable && placement && state.assetUrls) {
+    // Enter click-to-place. The light is committed on the first click.
+    state.selectedId = SCENE_ID;     // dismiss the picker; show scene props meanwhile
+    tree?.render();
+    refreshProps();
+    placement.begin(L, insertAt);
+    return;
+  }
+
+  // Reflector (or no assets yet): instant add at default position (legacy path).
+  insertAt.parentArr.splice(insertAt.index, 0, L);
   state.selectedId = L.id;
   tree?.render();
   refreshProps();
@@ -195,6 +257,7 @@ function onCanvasSelect(lightId) {
 // ─── Scene loading ────────────────────────────────────────────────────────
 async function applyScene(scene) {
   await flushSave();    // commit any pending auto-save against the previous scene
+  if (placement?.isActive()) placement.cancel();
 
   // Reset transient refine UI from any previous scene.
   if (state.refineMode) setRefineMode(false);
@@ -211,6 +274,7 @@ async function applyScene(scene) {
     state.sessionId = null;
     state.assetUrls = null;
     state.width = state.height = 0;
+    depthSampler = null;
     initialized = true;     // allow auto-save once the user fixes it
     return;
   }
@@ -250,6 +314,7 @@ async function applyScene(scene) {
     await initRenderer(canvas);
     await setAssets(state.assetUrls, canvas);
     await loadScene3D({ assetUrls: state.assetUrls });
+    depthSampler = createDepthSampler(state.assetUrls.depth_png_url);
     handlesAPI = mountHandles(state, redrawAndSave, onCanvasSelect);
     redraw();
     syncLightsToScene(state.lights, state.selectedId);   // initial population
@@ -417,6 +482,13 @@ async function setupPolishUI() {
 // ─── Bootstrap ────────────────────────────────────────────────────────────
 tree = mountTree(state, onTreeSelect, onChange, onRequestAddLight);
 refreshProps();
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && placement?.isActive()) {
+    e.preventDefault();
+    placement.cancel();
+  }
+});
 
 (async () => {
   setupPolishUI();   // fire-and-forget; doesn't block scene loading
