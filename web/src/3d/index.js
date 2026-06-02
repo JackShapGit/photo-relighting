@@ -21,10 +21,12 @@ let gizmoApi = null;
 let targetViz = null;
 let onLightChange = null;
 let placement = null;
+let getMedianDepth = () => 0.3;
 const raycaster = new THREE.Raycaster();
+raycaster.params.Points.threshold = 0.03;   // point-cloud hit tolerance for placement
 const mouse = new THREE.Vector2();
 
-export function mount3D({ onSelectLight, onUpdateLight, placement: placementCtl } = {}) {
+export function mount3D({ onSelectLight, onUpdateLight, placement: placementCtl, getMedianDepth: getMedian } = {}) {
   if (api) return api;
   const canvas = document.getElementById('canvas3d');
   if (!canvas) return null;
@@ -35,6 +37,7 @@ export function mount3D({ onSelectLight, onUpdateLight, placement: placementCtl 
   onLightSelected = onSelectLight || null;
   onLightChange = onUpdateLight || null;
   placement = placementCtl || null;
+  if (getMedian) getMedianDepth = getMedian;
 
   const overlayEl = document.getElementById('stage3d-overlay');
   if (overlayEl) {
@@ -102,14 +105,13 @@ function placementEngPoint(e) {
   raycaster.setFromCamera(mouse, api.getActiveCamera());
   // Prefer a real point-cloud hit (true depth); fall back to a plane at the
   // subject's median depth so a point is always produced.
-  raycaster.params.Points.threshold = 0.03;
   let hit = null;
   if (currentPointCloud) {
     const pts = raycaster.intersectObject(currentPointCloud.points, false);
     if (pts.length) hit = pts[0].point;
   }
   if (!hit) {
-    const medianEngZ = 1 - (window.__subjectMedianDepth ?? 0.3);
+    const medianEngZ = 1 - getMedianDepth();
     placementPlane.constant = -lightToWorld([0, 0, medianEngZ])[2];
     const p = new THREE.Vector3();
     if (!raycaster.ray.intersectPlane(placementPlane, p)) return null;

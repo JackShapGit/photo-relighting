@@ -297,7 +297,6 @@ async function applyScene(scene) {
   const sm = scene.session_metadata || {};
   state.subjectMedianDepth = typeof sm.subject_median_depth === 'number'
     ? sm.subject_median_depth : 0.3;
-  window.__subjectMedianDepth = state.subjectMedianDepth;
   syncLights(state);
   // Recompute derived direction for any targeted lights (guards against a stale
   // stored direction in the loaded scene).
@@ -518,6 +517,7 @@ document.addEventListener('keydown', (e) => {
       onChange();
     },
     placement,
+    getMedianDepth: () => state.subjectMedianDepth,
   });
 
   // Workspace badge in the header — hide for the default workspace so the
