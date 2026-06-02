@@ -1,6 +1,6 @@
 /** 3D viewport entry point. Mount once, hook lifecycle into main.js. */
 import * as THREE from 'three';
-import './coords.js';
+import { worldToLight, lightToWorld } from './coords.js';
 import './sync.js';
 import { buildPointCloud, disposePointCloud } from './point-cloud.js';
 import { disposeLightPrimitive } from './light-primitives.js';
@@ -20,10 +20,11 @@ let onLightSelected = null;
 let gizmoApi = null;
 let targetViz = null;
 let onLightChange = null;
+let placement = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-export function mount3D({ onSelectLight, onUpdateLight } = {}) {
+export function mount3D({ onSelectLight, onUpdateLight, placement: placementCtl } = {}) {
   if (api) return api;
   const canvas = document.getElementById('canvas3d');
   if (!canvas) return null;
@@ -33,6 +34,7 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
   window.addEventListener('resize', api.resize);
   onLightSelected = onSelectLight || null;
   onLightChange = onUpdateLight || null;
+  placement = placementCtl || null;
 
   const overlayEl = document.getElementById('stage3d-overlay');
   if (overlayEl) {
@@ -84,11 +86,62 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
   bindHotkeys({ api, gizmoApi });
 
   canvas.addEventListener('pointerdown', onCanvasClick);
+  canvas.addEventListener('pointermove', onPlacementMove);
+  canvas.addEventListener('contextmenu', onPlacementContext);
   return api;
+}
+
+const placementPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+function placementEngPoint(e) {
+  if (!api) return null;
+  const canvas = e.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, api.getActiveCamera());
+  // Prefer a real point-cloud hit (true depth); fall back to a plane at the
+  // subject's median depth so a point is always produced.
+  raycaster.params.Points.threshold = 0.03;
+  let hit = null;
+  if (currentPointCloud) {
+    const pts = raycaster.intersectObject(currentPointCloud.points, false);
+    if (pts.length) hit = pts[0].point;
+  }
+  if (!hit) {
+    const medianEngZ = 1 - (window.__subjectMedianDepth ?? 0.3);
+    placementPlane.constant = -lightToWorld([0, 0, medianEngZ])[2];
+    const p = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(placementPlane, p)) return null;
+    hit = p;
+  }
+  return worldToLight([hit.x, hit.y, hit.z]);
+}
+
+function onPlacementMove(e) {
+  if (!placement || placement.phase() !== 'awaitingTarget' || !targetViz) {
+    targetViz?.clearPreview();
+    return;
+  }
+  const L = placement.pendingLight();
+  const engPt = placementEngPoint(e);
+  if (!L || !engPt) { targetViz.clearPreview(); return; }
+  targetViz.showPreview(L.position, engPt);
+}
+
+function onPlacementContext(e) {
+  if (!placement || !placement.isActive()) return;
+  e.preventDefault();
+  placement.cancel();
 }
 
 function onCanvasClick(e) {
   if (e.button !== 0) return;                 // left click only
+  if (placement && placement.isActive()) {
+    const engPt = placementEngPoint(e);
+    if (engPt) placement.acceptSurfacePoint(engPt);
+    return;
+  }
   if (!api || primitives.size === 0) return;
   const canvas = e.currentTarget;
   const rect = canvas.getBoundingClientRect();
@@ -185,4 +238,9 @@ export function setGizmoMode(mode) {
 
 export function getGizmoMode() {
   return gizmoApi ? gizmoApi.getMode() : null;
+}
+
+export function notifyPlacementPhase(phase) {
+  if (!targetViz) return;
+  if (phase !== 'awaitingTarget') targetViz.clearPreview();
 }

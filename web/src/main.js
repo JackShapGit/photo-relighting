@@ -6,7 +6,7 @@ import {
 import { createPlacement } from './placement.js';
 import { createDepthSampler } from './depth-sampler.js';
 import {
-  loadScene3D, mount3D, refreshPointCloudColor, syncLightsToScene,
+  loadScene3D, mount3D, notifyPlacementPhase, refreshPointCloudColor, syncLightsToScene,
 } from './3d/index.js';
 import {
   prepare, listGobos, render as serverRender, renderLayers,
@@ -36,10 +36,6 @@ let handlesAPI = null;
 let depthSampler = null;     // rebuilt on each scene load; used by 2D placement
 let placement = null;        // created once below
 let placement2D = null;      // set in Task 4 (2D pane adapter)
-// Replaced by a real import in Task 5; shim keeps the app running until then.
-const notifyPlacementPhase3D = (phase) => {
-  if (window.__notifyPlacementPhase3D) window.__notifyPlacementPhase3D(phase);
-};
 // Suppress auto-save until the initial scene has been loaded — otherwise the
 // default in-memory state would overwrite the just-loaded scene's data on
 // the very first change. Set true at the end of applyScene().
@@ -176,7 +172,7 @@ function onPlacementPhase(phase) {
   else if (phase === 'awaitingTarget') setStatus('Click where the light should aim (Esc to cancel)');
   else setStatus('');
   placement2D?.setPhase(phase);
-  notifyPlacementPhase3D(phase);
+  notifyPlacementPhase(phase);
 }
 
 placement = createPlacement({
@@ -301,6 +297,7 @@ async function applyScene(scene) {
   const sm = scene.session_metadata || {};
   state.subjectMedianDepth = typeof sm.subject_median_depth === 'number'
     ? sm.subject_median_depth : 0.3;
+  window.__subjectMedianDepth = state.subjectMedianDepth;
   syncLights(state);
   // Recompute derived direction for any targeted lights (guards against a stale
   // stored direction in the loaded scene).
@@ -520,6 +517,7 @@ document.addEventListener('keydown', (e) => {
       applyTargeting(L);
       onChange();
     },
+    placement,
   });
 
   // Workspace badge in the header — hide for the default workspace so the

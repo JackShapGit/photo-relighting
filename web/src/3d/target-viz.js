@@ -25,6 +25,14 @@ export function createTargetViz(scene) {
   line.visible = false;
   scene.add(line);
 
+  const previewMat = new THREE.LineBasicMaterial({ color: 0xffd23f });
+  const previewGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(), new THREE.Vector3(),
+  ]);
+  const previewLine = new THREE.Line(previewGeo, previewMat);
+  previewLine.visible = false;
+  scene.add(previewLine);
+
   function show(light) {
     const lp = lightToWorld(light.position);
     const tp = lightToWorld(light.target);
@@ -44,10 +52,22 @@ export function createTargetViz(scene) {
     line.visible = false;
   }
 
+  function showPreview(fromEng, toEng) {
+    const a = lightToWorld(fromEng);
+    const b = lightToWorld(toEng);
+    const pos = previewLine.geometry.attributes.position;
+    pos.setXYZ(0, a[0], a[1], a[2]);
+    pos.setXYZ(1, b[0], b[1], b[2]);
+    pos.needsUpdate = true;
+    previewLine.visible = true;
+  }
+  function clearPreview() { previewLine.visible = false; }
+
   function dispose() {
     scene.remove(marker); marker.geometry.dispose(); marker.material.dispose();
     scene.remove(line); line.geometry.dispose(); line.material.dispose();
+    scene.remove(previewLine); previewLine.geometry.dispose(); previewLine.material.dispose();
   }
 
-  return { marker, show, hide, dispose };
+  return { marker, show, hide, dispose, showPreview, clearPreview };
 }
