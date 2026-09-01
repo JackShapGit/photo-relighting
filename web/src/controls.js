@@ -9,6 +9,8 @@ import { ensureGoboTexture } from './webgl/renderer.js';
 import { SCENE_ID, findNode } from './lights.js';
 import { PRESETS } from './presets.js';
 import { isTargeted, targetSpawnPoint, applyTargeting } from './targeting.js';
+import { toDisplay, parseLength } from './metric/units.js';
+import { syncLightFromFeet } from './metric/light-metric.js';
 
 const SLOT_VARS = ['--slot-key', '--slot-fill', '--slot-rim'];
 
@@ -56,7 +58,7 @@ export function renderProps(state, container, redraw, onStructural) {
     return;
   }
   const idx = state.lights.indexOf(node);
-  renderLightProps(node, idx, container, redraw, onStructural);
+  renderLightProps(node, idx, container, redraw, onStructural, state);
 }
 
 function renderGroupProps(G, container) {
@@ -209,7 +211,7 @@ function renderSceneProps(state, container, redraw) {
   });
 }
 
-function renderLightProps(L, slotIdx, container, redraw, onStructural) {
+function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {}) {
   if (L.type === 'reflector') {
     renderReflectorProps(L, slotIdx, container, redraw);
     return;
@@ -220,6 +222,21 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural) {
     .join('');
 
   const canTarget = L.type === 'directional' || L.type === 'spotlight';
+
+  // Calibrated scenes edit the light in feet/meters (world frame); the
+  // engine-space Position Z slider is hidden then because position_ft is
+  // authoritative and the engine position is derived from it.
+  const units = state.units || 'ft';
+  const metric = !!(state.calibration && L.position_ft);
+  const ftFields = (cls) => `
+      <label>Stage L/R <input class="${cls}-x" type="number" step="0.1" /></label>
+      <label>Height <input class="${cls}-y" type="number" step="0.1" /></label>
+      <label>Upstage <input class="${cls}-z" type="number" step="0.1" /></label>`;
+  const posBlock = metric ? `
+    <fieldset class="metric-pos"><legend>Position (${units})</legend>${ftFields('pos')}
+    </fieldset>
+    ${L.target_ft ? `<fieldset class="metric-tgt"><legend>Target (${units})</legend>${ftFields('tgt')}
+    </fieldset>` : ''}` : '';
 
   container.innerHTML = `
     <div class="props-header">
@@ -233,7 +250,7 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural) {
         <option value="spotlight">spotlight</option>
       </select>
     </label>
-    <label>Position Z <input class="position-z" type="range" min="-2" max="3" step="0.05" /></label>
+    ${metric ? posBlock : '<label>Position Z <input class="position-z" type="range" min="-2" max="3" step="0.05" /></label>'}
     <label>Direction Z <input class="direction-z" type="range" min="-1" max="1" step="0.02" /></label>
     ${canTarget ? '<label class="checkbox-row"><input type="checkbox" class="aim-at-target" /> Aim at target</label>' : ''}
     <label>Intensity <input class="intensity" type="range" min="0" max="3" step="0.01" /></label>
@@ -256,7 +273,7 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural) {
   const $ = (sel) => container.querySelector(sel);
 
   $('.type').value = L.type;
-  $('.position-z').value = L.position[2];
+  if (!metric) $('.position-z').value = L.position[2];
   $('.direction-z').value = L.direction[2];
   if (canTarget) {
     const targeted = isTargeted(L);
@@ -277,8 +294,32 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural) {
     $(sel).addEventListener('input', async (e) => { await fn(e.target); redraw(); });
 
   bind('.type', (t) => { L.type = t.value; });
-  bind('.position-z', (t) => { L.position[2] = parseFloat(t.value); });
+  if (!metric) bind('.position-z', (t) => { L.position[2] = parseFloat(t.value); });
   bind('.direction-z', (t) => { L.direction[2] = parseFloat(t.value); });
+
+  if (metric) {
+    // Values display in the current unit; edits parse back to feet (accepting
+    // "12.5", "3.8 m", "12'6\"") and re-derive the engine proxies.
+    const fill = (cls, arr) => ['x', 'y', 'z'].forEach((ax, i) => {
+      const el = $(`.${cls}-${ax}`);
+      if (el && arr) el.value = toDisplay(arr[i], units).toFixed(1);
+    });
+    fill('pos', L.position_ft);
+    fill('tgt', L.target_ft);
+    const bindFt = (sel, arrKey, i) => $(sel)?.addEventListener('change', (e) => {
+      const ft = parseLength(e.target.value, units);
+      if (ft == null) return;
+      L[arrKey][i] = ft;
+      syncLightFromFeet(L, state.calibration);
+      applyTargeting(L);
+      e.target.value = toDisplay(ft, units).toFixed(1);
+      redraw();
+    });
+    ['x', 'y', 'z'].forEach((ax, i) => {
+      bindFt(`.pos-${ax}`, 'position_ft', i);
+      if (L.target_ft) bindFt(`.tgt-${ax}`, 'target_ft', i);
+    });
+  }
   if (canTarget) {
     $('.aim-at-target').addEventListener('change', (e) => {
       if (e.target.checked) {

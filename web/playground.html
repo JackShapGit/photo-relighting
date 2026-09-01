@@ -35,6 +35,11 @@
       <button type="button" data-mode="split" aria-pressed="true" class="is-active">Split</button>
       <button type="button" data-mode="3d" aria-pressed="false">3D</button>
     </div>
+    <div class="view-mode" id="unit-toggle" role="group" aria-label="Units" title="Display feet or meters">
+      <button type="button" data-unit="ft" aria-pressed="true">ft</button>
+      <button type="button" data-unit="m" aria-pressed="false">m</button>
+    </div>
+    <button id="calibrate-btn" type="button" class="calib-badge" title="Calibrate the stage so lights are placed in real-world units">Calibrate</button>
     <div class="polish-controls" data-polish-controls hidden>
       <div class="polish-toggle" data-polish-toggle hidden>
         <button type="button" data-polish-toggle-classical class="is-active">Classical</button>

@@ -33,6 +33,7 @@ import {
   solveRecord, syncLightFromFeet, syncLightFromEngine, migrateLightsToFeet, clearMetric,
 } from './metric/light-metric.js';
 import { worldToEngine } from './metric/calibration.js';
+import { toDisplay } from './metric/units.js';
 import { mountPlacement2D } from './placement-pane-2d.js';
 
 const state = newState();
@@ -356,9 +357,11 @@ async function applyScene(scene) {
 
   // Calibration persists without the solved camera; re-solve against this
   // image's aspect and make sure every light carries feet coordinates.
-  state.units = s.units || 'ft';
+  // (Display units are a viewer preference kept in localStorage, not restored
+  // from the scene.)
   state.calibration = s.calibration ? solveRecord(s.calibration, state.height / state.width) : null;
   if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
+  document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
 
   tree.render();
   refreshProps();
@@ -850,3 +853,44 @@ function applyCalibration(record) {
 window.__applyCalibration = () => applyCalibration(state.calibration);
 window.__syncMetricLights = () => { if (state.calibration) migrateLightsToFeet(state.lights, state.calibration); };
 window.__redraw = () => redraw();
+
+// ─── Display units (ft | m) and the calibrate badge ───────────────────────
+// Units are a viewer preference: stored values stay in feet, only the props
+// pane and the badge convert for display.
+const UNITS_KEY = 'photo-relight:units';
+const unitToggle = document.getElementById('unit-toggle');
+const calibrateBtn = document.getElementById('calibrate-btn');
+try { state.units = localStorage.getItem(UNITS_KEY) === 'm' ? 'm' : 'ft'; } catch {}
+
+function formatBadge(rec) {
+  if (!rec) return 'Calibrate';
+  const u = state.units || 'ft';
+  const f = (ft) => toDisplay(ft, u).toFixed(1).replace(/\.0$/, '');
+  return `${f(rec.width_ft)} × ${f(rec.height_ft)} × ${f(rec.depth_ft)} ${u}`;
+}
+function updateBadge() {
+  if (!calibrateBtn) return;
+  calibrateBtn.textContent = formatBadge(state.calibration);
+  calibrateBtn.classList.toggle('is-calibrated', !!state.calibration);
+  calibrateBtn.title = state.calibration
+    ? 'Stage calibration (click to edit)'
+    : 'Calibrate the stage so lights are placed in real-world units';
+}
+function applyUnits(u) {
+  state.units = u === 'm' ? 'm' : 'ft';
+  try { localStorage.setItem(UNITS_KEY, state.units); } catch {}
+  if (unitToggle) {
+    for (const b of unitToggle.querySelectorAll('[data-unit]')) {
+      b.setAttribute('aria-pressed', b.dataset.unit === state.units ? 'true' : 'false');
+    }
+  }
+  document.dispatchEvent(new CustomEvent('relight:units', { detail: state.units }));
+  updateBadge();
+  refreshProps();
+}
+unitToggle?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-unit]');
+  if (b) applyUnits(b.dataset.unit);
+});
+document.addEventListener('relight:calibration', updateBadge);
+applyUnits(state.units);

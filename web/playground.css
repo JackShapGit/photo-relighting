@@ -976,3 +976,23 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
   outline: 1px solid rgba(106, 207, 255, 0.4);
   outline-offset: 2px;
 }
+
+/* ─── Units toggle + calibrate badge (header) ───────────────────────────── */
+/* #unit-toggle reuses .view-mode. The Calibrate button doubles as the badge
+ * once a calibration is applied ("40 × 20 × 30 ft"). */
+.calib-badge { font-size: 12px; padding: 4px 8px; white-space: nowrap; }
+.calib-badge.is-calibrated {
+  border-color: var(--accent, #4a7);
+  color: var(--accent, #4a7);
+}
+
+/* ─── Metric position fields in the props pane ─────────────────────────── */
+.metric-pos, .metric-tgt {
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 6px 0;
+}
+.metric-pos legend, .metric-tgt legend { font-size: 11px; color: var(--text-muted); padding: 0 4px; }
+.metric-pos label, .metric-tgt label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; margin: 3px 0; }
+.metric-pos input, .metric-tgt input { width: 84px; }
