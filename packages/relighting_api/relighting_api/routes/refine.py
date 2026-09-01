@@ -14,6 +14,8 @@ from typing import Annotated
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request
 from PIL import Image
+
+from relighting_engine.core.raw import decode_to_srgb_pil
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -59,7 +61,11 @@ async def refine_mask(req: RefineMaskRequest, request: Request) -> dict:
     source_files = sorted(sess_dir.glob("source.*"))
     if not source_files:
         raise HTTPException(status_code=409, detail="missing source image for session")
-    pil = Image.open(source_files[0]).convert("RGB")
+    # A raw upload persists as "source.raw", which Pillow cannot read; decode
+    # it through LibRaw first and fall back to Pillow for ordinary formats.
+    pil = decode_to_srgb_pil(source_files[0].read_bytes())
+    if pil is None:
+        pil = Image.open(source_files[0]).convert("RGB")
     h, w = pil.size[1], pil.size[0]
 
     ctx = {"embeddings": embeddings, "image_size": (h, w), "pil_image": pil}

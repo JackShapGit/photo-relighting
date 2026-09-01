@@ -13,6 +13,7 @@ dependencies = [
     "pillow>=10.2",
     "pillow-heif>=0.18",
     "imageio[tifffile]>=2.34",
+    "rawpy>=0.21",  # LibRaw bindings: DNG/CR2/CR3/NEF/ARW/RAF/ORF/RW2 decoding
     "scipy>=1.12",
     "transformers>=4.41",
     "huggingface_hub>=0.23",
