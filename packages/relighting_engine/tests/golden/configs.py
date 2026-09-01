@@ -69,6 +69,8 @@ def configs() -> list[tuple[str, list[Light], float, dict | None]]:
         ("calibrated_foh_spot", [
             Light(type="spotlight", position=(0.5, 0.2, 1.0), direction=(0.0, 0.3, -1.0),
                   position_ft=(0.0, 20.0, -60.0), target_ft=(0.0, 5.0, 10.0),
-                  intensity=1.5, cone_angle=0.35, softness=0.1),
+                  # 8.0 at a 60 ft throw attenuates (falloff/width_ft²) to ~2 on
+                  # stage; 1.5 rendered near-black on this dark synthetic fixture.
+                  intensity=8.0, cone_angle=0.35, softness=0.1),
         ], 0.1, CALIBRATION),
     ]

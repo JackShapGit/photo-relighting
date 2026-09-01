@@ -104,7 +104,7 @@ test.fixme('WebGL calibrated render matches Python golden within tolerance', asy
       depth_fit: { a: -0.037037, b: 0.024074 }, depth_check: null };
     window.__applyCalibration();   // Task 8 exposes this: solves camera, syncs lights
     s.lights = [{ type: 'spotlight', position: [0.5, 0.2, 1.0], direction: [0, 0.3, -1],
-      position_ft: [0, 20, -60], target_ft: [0, 5, 10], intensity: 1.5, falloff: 1.0,
+      position_ft: [0, 20, -60], target_ft: [0, 5, 10], intensity: 8.0, falloff: 1.0,
       cone_angle: 0.35, softness: 0.1, color: [1,1,1], color_temperature: null, gel_preset: null,
       gobo: null, affects: 'all', enabled: true }];
     window.__syncMetricLights();   // Task 8 exposes this
