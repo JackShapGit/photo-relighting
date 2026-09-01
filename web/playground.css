@@ -818,20 +818,37 @@ button.refine-toggle.active {
 
 /* ─── 3D viewport split ─────────────────────────────────────────────────── */
 
+/* --split is the 2D pane's share of the usable width (stage minus the
+ * divider); split-view.js writes it. Both panes get an explicit basis so
+ * 0.5 is exactly half and half regardless of #canvas-wrap's JS-set width. */
 #stage {
+  --split: 0.5;
+  --divider-w: 6px;
   display: flex;
   flex-direction: row;
   align-items: stretch;
   overflow: hidden;
 }
 
+#stage2d-wrap {
+  flex: 0 0 calc((100% - var(--divider-w)) * var(--split));
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* canvas-wrap gets an explicit px size from fitCanvasWrap; never let flex
+ * stretch it or the image squashes. */
 #canvas-wrap {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
 }
 
 #stage3d-wrap {
-  flex: 1 1 auto;
+  flex: 0 0 calc((100% - var(--divider-w)) * (1 - var(--split)));
   min-width: 0;
   position: relative;
   background: #0b0b0b;
@@ -839,12 +856,27 @@ button.refine-toggle.active {
 
 #stage3d-wrap[hidden] { display: none !important; }
 
-/* When the 3D pane is hidden, center the photo canvas in #stage and let
- * its explicit width (set by fitCanvasWrap to preserve aspect ratio)
- * win over flex-grow. Without this, canvas-wrap stretches to fill the
- * full stage width and the image gets squashed horizontally. */
-#stage.stage--3d-hidden { justify-content: center; }
-#stage.stage--3d-hidden #canvas-wrap { flex: 0 0 auto; }
+/* 2D mode: the photo pane takes the whole stage. */
+#stage.stage--mode-2d #stage2d-wrap { flex-basis: 100%; }
+
+/* 3D mode: the 3D pane takes the whole stage. The 2D pane stays laid out
+ * (full stage size) but invisible instead of display:none, because
+ * renderer.draw() sizes the WebGL canvas from clientWidth/clientHeight and
+ * the 3D point cloud mirrors that canvas into its texture. A display:none
+ * pane would zero the canvas and freeze the cloud's colors. */
+#stage.stage--mode-3d #stage3d-wrap { flex-basis: 100%; }
+#stage.stage--mode-3d #stage2d-wrap {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* While dragging the divider, keep the cursor/selection stable and stop the
+ * 3D canvas (OrbitControls) from grabbing pointer events. */
+body.is-resizing-split { cursor: col-resize; user-select: none; }
+body.is-resizing-split #stage2d-wrap,
+body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 
 #canvas3d {
   width: 100%;
@@ -853,12 +885,14 @@ button.refine-toggle.active {
 }
 
 .stage-divider {
-  flex: 0 0 6px;
+  flex: 0 0 var(--divider-w, 6px);
   background: var(--border, #333);
   cursor: col-resize;
   user-select: none;
+  touch-action: none;
 }
-.stage-divider:hover { background: var(--accent, #4a7); }
+.stage-divider:hover,
+.stage-divider.is-active { background: var(--accent, #4a7); }
 
 .stage3d-overlay {
   position: absolute;
@@ -893,6 +927,29 @@ button.refine-toggle.active {
 }
 
 .stage-divider[hidden] { display: none !important; }
+
+/* Header segmented control: 2D | Split | 3D (mirrors .polish-toggle). */
+.view-mode {
+  display: inline-flex;
+  border: 1px solid var(--input-border, #444);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.view-mode button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-primary, #ddd);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.view-mode button + button { border-left: 1px solid var(--input-border, #444); }
+.view-mode button:hover { background: var(--bg-hover); }
+.view-mode button[aria-pressed="true"] {
+  background: var(--accent, #4a7);
+  color: #fff;
+}
 
 /* ─── Placement overlay (click-to-place lights) ────────────────────────── */
 #placement-overlay {

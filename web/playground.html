@@ -30,7 +30,11 @@
     <button id="refine-clear-btn" type="button" hidden>Clear points</button>
     <button id="export-btn" type="button">Export PNG</button>
     <button id="export-layers-btn" type="button" hidden>Export Layers (PSD)</button>
-    <button id="toggle-3d-btn" type="button" title="Show or hide the 3D viewport">Hide 3D</button>
+    <div class="view-mode" id="view-mode" role="group" aria-label="View mode" title="Show the photo, the 3D viewport, or both">
+      <button type="button" data-mode="2d" aria-pressed="false">2D</button>
+      <button type="button" data-mode="split" aria-pressed="true" class="is-active">Split</button>
+      <button type="button" data-mode="3d" aria-pressed="false">3D</button>
+    </div>
     <div class="polish-controls" data-polish-controls hidden>
       <div class="polish-toggle" data-polish-toggle hidden>
         <button type="button" data-polish-toggle-classical class="is-active">Classical</button>
@@ -63,21 +67,23 @@
     </aside>
 
     <section id="stage">
-      <div id="canvas-wrap">
-        <canvas id="canvas"></canvas>
-        <div id="handles"></div>
-        <div id="refine-overlay" hidden></div>
-        <div id="placement-overlay" hidden></div>
-        <div class="polish-shimmer" data-polish-shimmer hidden>
-          <span class="polish-shimmer-text" data-polish-shimmer-text>Polishing…</span>
+      <div id="stage2d-wrap">
+        <div id="canvas-wrap">
+          <canvas id="canvas"></canvas>
+          <div id="handles"></div>
+          <div id="refine-overlay" hidden></div>
+          <div id="placement-overlay" hidden></div>
+          <div class="polish-shimmer" data-polish-shimmer hidden>
+            <span class="polish-shimmer-text" data-polish-shimmer-text>Polishing…</span>
+          </div>
+          <button
+            type="button"
+            class="polish-expand-btn"
+            data-polish-expand-btn
+            title="Open polished image"
+            hidden
+          >⤢</button>
         </div>
-        <button
-          type="button"
-          class="polish-expand-btn"
-          data-polish-expand-btn
-          title="Open polished image"
-          hidden
-        >⤢</button>
       </div>
       <div class="stage-divider" id="stage-divider"></div>
       <div id="stage3d-wrap">

@@ -28,6 +28,7 @@ import { mountTree } from './tree.js';
 import { initTheme } from './theme.js';
 import { openNewScenePopup } from './new-scene-popup.js';
 import { openScenesListModal } from './scenes-list-modal.js';
+import { createSplitView } from './split-view.js';
 import { mountPlacement2D } from './placement-pane-2d.js';
 
 const state = newState();
@@ -101,10 +102,12 @@ async function flushSave() {
 
 // ─── Render plumbing ──────────────────────────────────────────────────────
 function fitCanvasWrap() {
-  const stage = document.getElementById('stage');
+  // Letterbox inside the 2D pane (not the whole stage) so the image keeps
+  // its aspect ratio at any split width.
+  const pane = document.getElementById('stage2d-wrap') || document.getElementById('stage');
   const wrap = document.getElementById('canvas-wrap');
   if (!state.width || !state.height) return;
-  const sw = stage.clientWidth, sh = stage.clientHeight;
+  const sw = pane.clientWidth, sh = pane.clientHeight;
   const ar = state.width / state.height;
   let w, h;
   if (sw / sh > ar) { h = sh; w = Math.round(h * ar); }
@@ -115,7 +118,11 @@ function fitCanvasWrap() {
 
 window.addEventListener('resize', () => {
   fitCanvasWrap();
-  if (state.sessionId) document.dispatchEvent(new Event('relight:redraw'));
+  // Re-render at the new canvas size (draw() resizes the backing buffer
+  // from clientWidth/Height) and refresh the 3D texture mirror. Without
+  // this the canvas is CSS-stretched over a stale buffer until the next
+  // light edit. redraw is a no-op before a session exists.
+  redraw();
 });
 
 const redraw = () => {
@@ -680,35 +687,17 @@ refineOverlay.addEventListener('pointerdown', async (e) => {
   }
 });
 
-const SPLIT_KEY = 'photo-relight:show-3d';
-const toggle3dBtn = document.getElementById('toggle-3d-btn');
-const stage3dWrap = document.getElementById('stage3d-wrap');
-const stageDivider = document.getElementById('stage-divider');
-
-function apply3dVisibility(visible) {
-  if (!stage3dWrap || !stageDivider) return;
-  stage3dWrap.hidden = !visible;
-  stageDivider.hidden = !visible;
-  toggle3dBtn.textContent = visible ? 'Hide 3D' : 'Show 3D';
-  // Center the photo canvas (no flex-grow) when 3D is hidden so the
-  // aspect-ratio-preserving width set by fitCanvasWrap actually takes hold.
-  document.getElementById('stage')?.classList.toggle('stage--3d-hidden', !visible);
-  try { localStorage.setItem(SPLIT_KEY, visible ? '1' : '0'); } catch {}
-  // The window resize listener re-runs fitCanvasWrap and the 3D renderer's
-  // resize against the new available width.
-  window.dispatchEvent(new Event('resize'));
-}
-
-if (toggle3dBtn) {
-  toggle3dBtn.addEventListener('click', () => {
-    apply3dVisibility(stage3dWrap?.hidden);
-  });
-  // Restore saved state.
-  try {
-    const saved = localStorage.getItem(SPLIT_KEY);
-    if (saved === '0') apply3dVisibility(false);
-  } catch {}
-}
+// 2D | Split | 3D view mode and the draggable divider. Every mode/ratio
+// change fires a window 'resize' so fitCanvasWrap and the 3D renderer's
+// resize re-measure against the new pane widths.
+createSplitView({
+  stageEl: document.getElementById('stage'),
+  dividerEl: document.getElementById('stage-divider'),
+  pane2dEl: document.getElementById('stage2d-wrap'),
+  pane3dEl: document.getElementById('stage3d-wrap'),
+  modeEl: document.getElementById('view-mode'),
+  onLayout: () => window.dispatchEvent(new Event('resize')),
+});
 
 document.getElementById('export-btn').addEventListener('click', async () => {
   if (!state.sessionId) return;
