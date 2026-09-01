@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test:parity": "playwright test --config=web/tests/playwright.config.js",
-    "test:unit": "node --test web/tests/unit/*.test.js"
+    "test:unit": "node --test web/tests/unit/*.test.js web/tests/unit/metric/*.test.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0"
