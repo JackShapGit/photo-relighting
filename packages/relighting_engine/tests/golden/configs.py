@@ -19,12 +19,14 @@ REFLECTOR_FIXTURES = ["portrait_a.jpg"]
 
 # Synthetic 40x20x30 ft stage seen head-on from 60 ft (see Global Constraints);
 # marks are in image fractions for the 3:4 fixture layout, aspect comes from
-# the fixture image at render time.
+# the fixture image at render time. The depth fit is matched to the portrait_a
+# fixture (d_lip = 0.5 -> 60 ft, d_back = 0.7 -> 90 ft, so d = 1.0 -> 360 ft and
+# nothing clamps to Z_CAM_MAX); the Task-2 synthetic a/b live in the unit tests.
 CALIBRATION = {
     "width_ft": 40, "height_ft": 20, "depth_ft": 30,
     "marks": {"lipL": [0.1, 0.61333], "lipR": [0.9, 0.61333], "top": [0.5, 0.08],
               "backL": [0.23333, 0.54222], "backR": [0.76667, 0.54222]},
-    "depth_fit": {"a": -0.037037, "b": 0.024074},
+    "depth_fit": {"a": -0.027778, "b": 0.030556},
 }
 
 
@@ -69,8 +71,9 @@ def configs() -> list[tuple[str, list[Light], float, dict | None]]:
         ("calibrated_foh_spot", [
             Light(type="spotlight", position=(0.5, 0.2, 1.0), direction=(0.0, 0.3, -1.0),
                   position_ft=(0.0, 20.0, -60.0), target_ft=(0.0, 5.0, 10.0),
-                  # 8.0 at a 60 ft throw attenuates (falloff/width_ft²) to ~2 on
-                  # stage; 1.5 rendered near-black on this dark synthetic fixture.
-                  intensity=8.0, cone_angle=0.35, softness=0.1),
+                  # 0.6 rad cone covers the 40 ft width from 60 ft; 6.0 attenuates
+                  # (falloff/width_ft²) to ~1.5 on stage and puts the golden's mean
+                  # luma at ~0.10 with < 3 % clipped pixels.
+                  intensity=6.0, cone_angle=0.6, softness=0.1),
         ], 0.1, CALIBRATION),
     ]
