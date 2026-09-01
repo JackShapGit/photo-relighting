@@ -80,6 +80,13 @@ export function directionToWorld(dir, zScale = Z_SCALE) {
   return [wx / len, wy / len, wz / len];
 }
 
+/** Calibrated scenes: the Three.js frame is the world frame in FEET with Z
+ * negated (world +Z = upstage, Three +z = toward the house), so the camera on
+ * the negative-Three-z side keeps looking from the house toward the stage.
+ * Works for positions and for direction vectors alike. */
+export function worldFtToThree([X, Y, Z]) { return [X, Y, -Z]; }
+export function threeToWorldFt([x, y, z]) { return [x, y, -z]; }
+
 /** World unit vector → engine direction unit vector. Inverse of directionToWorld. */
 export function worldToDirection(worldDir, zScale = Z_SCALE) {
   const ex = -worldDir[0] * 0.5;

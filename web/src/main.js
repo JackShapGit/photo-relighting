@@ -7,6 +7,7 @@ import { createPlacement } from './placement.js';
 import { createDepthSampler } from './depth-sampler.js';
 import {
   loadScene3D, mount3D, notifyPlacementPhase, refreshPointCloudColor, syncLightsToScene,
+  setCalibration3D, setUnits3D, frameStage3D,
 } from './3d/index.js';
 import {
   prepare, listGobos, render as serverRender, renderLayers,
@@ -362,7 +363,6 @@ async function applyScene(scene) {
   // from the scene.)
   state.calibration = s.calibration ? solveRecord(s.calibration, state.height / state.width) : null;
   if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
-  document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
 
   tree.render();
   refreshProps();
@@ -372,12 +372,16 @@ async function applyScene(scene) {
     const canvas = document.getElementById('canvas');
     await initRenderer(canvas);
     await setAssets(state.assetUrls, canvas);
-    await loadScene3D({ assetUrls: state.assetUrls });
+    await loadScene3D({ assetUrls: state.assetUrls, calibration: state.calibration, units: state.units });
     depthSampler = createDepthSampler(state.assetUrls.depth_png_url);
     handlesAPI = mountHandles(state, onHandlesChange, onCanvasSelect);
     redraw();
     syncLightsToScene(state.lights, state.selectedId);   // initial population
+    frameStage3D();                                       // home view includes FOH fixtures
   }
+  // Badge/props/3D listeners: the 3D side already holds this record (passed to
+  // loadScene3D above), so its listener is a no-op here.
+  document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
   initialized = true;
   setStatus('');
 }
@@ -571,18 +575,24 @@ document.addEventListener('keydown', (e) => {
       // Targeted lights derive direction from target - position; recompute after
       // any target OR position change so the beam tracks live.
       applyTargeting(L);
-      // Metric sync: feet patches (Task 11's 3D side) are authoritative for
-      // feet; engine patches (today's gizmo drags) re-derive feet from engine.
+      // Metric sync: feet patches (calibrated gizmo/target drags) are
+      // authoritative for feet; engine patches re-derive feet from engine.
       if (state.calibration && L.type !== 'reflector') {
-        if (patch.position_ft) {
-          L.position_ft = patch.position_ft;
+        const feetPatch = patch.position_ft || 'target_ft' in patch || patch.direction_ft;
+        if (feetPatch) {
+          if (patch.position_ft) L.position_ft = patch.position_ft;
           if ('target_ft' in patch) L.target_ft = patch.target_ft;
+          if (patch.direction_ft) L.direction_ft = patch.direction_ft;
           syncLightFromFeet(L, state.calibration);
+          applyTargeting(L);
         } else {
           syncLightFromEngine(L, state.calibration);
         }
       }
       onChange();
+      // Calibrated: the props pane shows feet fields that must follow gizmo
+      // and target drags (the engine-space sliders never tracked drags).
+      if (state.calibration && state.selectedId === id) refreshProps();
     },
     placement,
     getMedianDepth: () => state.subjectMedianDepth,
@@ -894,8 +904,17 @@ unitToggle?.addEventListener('click', (e) => {
   if (b) applyUnits(b.dataset.unit);
 });
 // Calibration changes swap the props pane between engine-space and feet
-// controls, so re-render it along with the badge.
-document.addEventListener('relight:calibration', () => { updateBadge(); refreshProps(); });
+// controls, so re-render it along with the badge; the 3D viewport rebuilds in
+// the matching frame (no-op when it already holds this record) and re-syncs
+// its light primitives.
+document.addEventListener('relight:calibration', async (e) => {
+  updateBadge();
+  refreshProps();
+  await setCalibration3D(e.detail, state.units);
+  syncLightsToScene(state.lights, state.selectedId);
+  frameStage3D();
+});
+document.addEventListener('relight:units', (e) => setUnits3D(e.detail));
 applyUnits(state.units);
 
 // ─── Calibration panel (five-click marking) ───────────────────────────────

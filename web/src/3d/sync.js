@@ -34,6 +34,11 @@ function shallowLightEqual(a, b) {
   if (a.type !== b.type) return false;
   if (!arrayEq(a.position, b.position)) return false;
   if (!arrayEq(a.direction, b.direction)) return false;
+  // Calibrated lights: feet fields can change while the engine proxies stay
+  // put (e.g. an FOH light with no in-frame projection).
+  if (!arrayEq(a.position_ft, b.position_ft)) return false;
+  if (!arrayEq(a.direction_ft, b.direction_ft)) return false;
+  if (!arrayEq(a.target_ft, b.target_ft)) return false;
   if (!arrayEq(a.color, b.color)) return false;
   if ((a.cone_angle ?? null) !== (b.cone_angle ?? null)) return false;
   if ((a.intensity ?? null) !== (b.intensity ?? null)) return false;

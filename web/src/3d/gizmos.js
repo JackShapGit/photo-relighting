@@ -3,19 +3,22 @@
  * Translate mode by default. Rotate mode is enabled by the consumer when
  * the selected light's type supports direction (directional / spotlight).
  *
- * Writebacks happen via the `onTranslate` and `onRotate` callbacks:
- *   onTranslate(lightId, [x, y, z]) — new world-space position
- *   onRotate(lightId, [dx, dy, dz]) — new normalized direction unit vector
+ * Writebacks happen via the `onTranslate`, `onRotate` and `onTargetMove`
+ * callbacks, each receiving (lightId, patch) where patch is a partial light:
+ *   engine frame (uncalibrated):  { position } / { direction | normal } / { target }
+ *   feet frame (calibrated):      { position_ft } / { direction_ft } / { target_ft }
+ * `getMetric()` tells the gizmo which frame the dragged objects live in.
  */
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { worldToDirection, worldToLight } from './coords.js';
+import { worldToDirection, worldToLight, threeToWorldFt } from './coords.js';
 
-export function createGizmo({ camera, canvas, orbitControls, scene, onTranslate, onRotate, onTargetMove }) {
+export function createGizmo({ camera, canvas, orbitControls, scene, onTranslate, onRotate, onTargetMove, getMetric = () => null }) {
   const gizmo = new TransformControls(camera, canvas);
   gizmo.setMode('translate');
   gizmo.setSize(0.8);
   scene.add(gizmo);
+  const metric = () => !!getMetric();
 
   // Disable orbit controls while dragging the gizmo (standard pattern).
   gizmo.addEventListener('dragging-changed', (e) => {
@@ -33,29 +36,33 @@ export function createGizmo({ camera, canvas, orbitControls, scene, onTranslate,
     if (attachedKind === 'target') {
       if (!attachedTargetLightId || !attachedPrimitive) return;
       const m = attachedPrimitive;   // for target, attachedPrimitive IS the marker Object3D
-      const engPos = worldToLight([m.position.x, m.position.y, m.position.z]);
-      if (onTargetMove) onTargetMove(attachedTargetLightId, engPos);
+      const p = [m.position.x, m.position.y, m.position.z];
+      const patch = metric() ? { target_ft: threeToWorldFt(p) } : { target: worldToLight(p) };
+      if (onTargetMove) onTargetMove(attachedTargetLightId, patch);
       return;
     }
     if (!attachedLightId || !attachedPrimitive) return;
     const g = attachedPrimitive.group;
     if (gizmo.getMode() === 'translate') {
-      const engPos = worldToLight([g.position.x, g.position.y, g.position.z]);
-      onTranslate(attachedLightId, engPos);
+      const p = [g.position.x, g.position.y, g.position.z];
+      const patch = metric() && attachedLightType !== 'reflector'
+        ? { position_ft: threeToWorldFt(p) }
+        : { position: worldToLight(p) };
+      onTranslate(attachedLightId, patch);
     } else if (gizmo.getMode() === 'rotate' && attachedLightType !== 'point') {
       if (attachedLightType === 'reflector') {
         // Reflector plane's "front" is local +Z (from setFromUnitVectors above).
         const worldDir = new THREE.Vector3(0, 0, 1).applyQuaternion(g.quaternion).normalize();
         const engNormal = worldToDirection([worldDir.x, worldDir.y, worldDir.z]);
-        onRotate(attachedLightId, engNormal, 'normal');
+        onRotate(attachedLightId, { normal: engNormal });
       } else {
         // The cone primitive is built along -Y in light-primitives.js; that's
         // its "forward" axis. Rotate it by the group's quaternion to get the
-        // current world-space pointing vector, then convert back to engine
-        // direction space.
+        // current Three-space pointing vector, then convert back to the light's
+        // direction space (engine, or world feet when calibrated).
         const worldDir = new THREE.Vector3(0, -1, 0).applyQuaternion(g.quaternion).normalize();
-        const engDir = worldToDirection([worldDir.x, worldDir.y, worldDir.z]);
-        onRotate(attachedLightId, engDir, 'direction');
+        const d = [worldDir.x, worldDir.y, worldDir.z];
+        onRotate(attachedLightId, metric() ? { direction_ft: threeToWorldFt(d) } : { direction: worldToDirection(d) });
       }
     }
   });
