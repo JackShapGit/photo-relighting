@@ -20,6 +20,26 @@ from relighting_api.routes import session as session_route
 from relighting_api.scene_store import SceneStore
 from relighting_api.session_store import SessionStore
 
+class _RevalidatingStaticFiles(StaticFiles):
+    """StaticFiles that forces a conditional request on every asset.
+
+    Starlette sends ETag and Last-Modified but no Cache-Control. With no
+    directive, browsers fall back to HEURISTIC freshness and will reuse a
+    cached ES module for a long stretch WITHOUT revalidating -- so a shipped
+    UI change never reaches anyone who has visited before, even in a new tab.
+    That is not theoretical: it silently hid a file-picker fix here.
+
+    "no-cache" does not mean "do not store" -- it means "revalidate before
+    reuse". The ETag still turns the check into a cheap 304, so this costs one
+    round trip per asset rather than re-downloading anything.
+    """
+
+    def file_response(self, *args, **kwargs):  # type: ignore[override]
+        resp = super().file_response(*args, **kwargs)
+        resp.headers.setdefault("Cache-Control", "no-cache")
+        return resp
+
+
 def create_app(skip_engine: bool = False) -> FastAPI:
     # Read paths inside the factory so test fixtures can monkeypatch the env
     # vars before instantiation. Defaults match the production layout.
@@ -71,14 +91,14 @@ def create_app(skip_engine: bool = False) -> FastAPI:
         / "relighting_engine" / "relighting_engine" / "assets"
     )
     if static_root.exists():
-        app.mount("/static", StaticFiles(directory=static_root), name="static")
+        app.mount("/static", _RevalidatingStaticFiles(directory=static_root), name="static")
     cache_root = cache_dir.parent if cache_dir.name == "sessions" else cache_dir
     cache_root.mkdir(parents=True, exist_ok=True)
     app.mount("/cache", StaticFiles(directory=str(cache_root)), name="cache")
 
     web_dir = Path(__file__).resolve().parents[3] / "web"
     if web_dir.exists():
-        app.mount("/web", StaticFiles(directory=str(web_dir), html=True), name="web")
+        app.mount("/web", _RevalidatingStaticFiles(directory=str(web_dir), html=True), name="web")
 
     return app
 
