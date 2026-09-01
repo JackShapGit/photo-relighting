@@ -41,14 +41,14 @@ export function invalidatePolish() {
 /** Fire a polish request. Returns early if already in flight. */
 export async function startPolish({ sessionId, lights, ambient,
                                     ambientSubject = null, ambientBackground = null,
-                                    shadowStyle, seed = null }) {
+                                    shadowStyle, seed = null, calibration = null }) {
   if (state.status === 'polishing') return;
   state = { ...state, status: 'polishing', error: null };
   emit();
   try {
     const blob = await polishScene({
       sessionId, lights, ambient, ambientSubject, ambientBackground, shadowStyle,
-      prompt: state.prompt, seed,
+      prompt: state.prompt, seed, calibration,
     });
     const blobUrl = URL.createObjectURL(blob);
     state = { ...state, status: 'ready', blobUrl };

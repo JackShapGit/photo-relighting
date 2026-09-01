@@ -44,5 +44,12 @@ export function targetSpawnPoint(light, dist = TARGET_SPAWN_DIST) {
 // otherwise. Call after any change to a light's target or position.
 export function applyTargeting(light) {
   if (isTargeted(light)) light.direction = deriveDirection(light);
+  // Calibrated lights carry a feet-space target too; derive the feet direction
+  // from it so the metric renderer aims the same way.
+  if (light.position_ft && light.target_ft) {
+    const d = [0, 1, 2].map((i) => light.target_ft[i] - light.position_ft[i]);
+    const n = Math.hypot(...d);
+    if (n > EPS) light.direction_ft = d.map((c) => c / n);
+  }
   return light;
 }

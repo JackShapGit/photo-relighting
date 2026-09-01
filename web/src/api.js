@@ -155,7 +155,7 @@ export async function polishScene({ sessionId, lights, ambient,
                                     shadowStyle,
                                     prompt = '', seed = null,
                                     outputFormat = 'png', outputBitDepth = 8,
-                                    outputResolution = null }) {
+                                    outputResolution = null, calibration = null }) {
   const r = await fetch('/polish', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -163,6 +163,7 @@ export async function polishScene({ sessionId, lights, ambient,
       session_id: sessionId,
       lights,
       ambient,
+      calibration,
       ambient_subject: ambientSubject,
       ambient_background: ambientBackground,
       shadow_style: shadowStyle,

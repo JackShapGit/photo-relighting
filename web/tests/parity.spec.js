@@ -11,15 +11,42 @@ const GOLDEN_CAL = path.resolve('packages/relighting_engine/tests/fixtures/expec
 const HEADER_H = 44;
 const CONTROLS_W = 320;
 
-// Create a scene from the fixture through the new-scene popup (open on a
-// fresh browser profile) and wait for the prepared dimensions. The Create
-// button only enables once both a name and a file are set.
+// Each parity test runs a real /prepare (depth + segmentation) and builds the
+// 3D point cloud under software GL; the default 30 s budget is too tight and
+// a page.evaluate can block for several seconds while the cloud is built.
+test.setTimeout(120_000);
+const t0 = Date.now();
+const mark = (label) => console.log(`[parity +${((Date.now() - t0) / 1000).toFixed(1)}s] ${label}`);
+
+// Create a scene from the fixture through the new-scene popup and wait for the
+// prepared dimensions. The popup opens by itself only when the server has no
+// scenes; once a previous run has created one, open it with "+ New Scene".
+// The Create button only enables once both a name and a file are set.
 async function uploadFixture(page) {
+  // 2D-only view so the photo canvas gets the whole stage (the default Split
+  // mode halves it and the capture would be letterboxed to ~130 px wide).
+  await page.addInitScript(() => { try { localStorage.setItem('photo-relight:view-mode', '2d'); } catch {} });
   await page.goto('http://localhost:8765/web/playground.html');
+  const popupOpen = await page.locator('#ns-name').waitFor({ state: 'visible', timeout: 5000 })
+    .then(() => true, () => false);
+  if (!popupOpen) {
+    await page.click('#new-scene-btn');
+    await page.locator('#ns-name').waitFor({ state: 'visible', timeout: 10000 });
+  }
+  // When a previous run's scene auto-loaded, __state already has a width, so
+  // wait for the scene id to change rather than for width alone; otherwise the
+  // late applyScene would overwrite the lights this test sets.
+  const prevScene = await page.evaluate(() => window.__state?.sceneId ?? null);
   await page.fill('#ns-name', 'parity');
   await page.setInputFiles('#ns-file', FIXTURE);
   await page.click('#ns-create');
-  await page.waitForFunction(() => window.__state?.width > 0 && window.__state?.height > 0, { timeout: 60000 });
+  await page.waitForFunction((prev) => {
+    const s = window.__state;
+    return !!s?.sceneId && s.sceneId !== prev && s.width > 0 && s.height > 0;
+  }, prevScene, { timeout: 60000 });
+  // applyScene sets width before its awaited renderer/texture setup; give it a
+  // moment to finish before touching lights.
+  await page.waitForTimeout(1500);
 
   // Read the prepared image dimensions and resize the viewport so the canvas
   // is exactly width×height — no scaling artefacts in the parity comparison.
@@ -30,9 +57,8 @@ async function uploadFixture(page) {
   await page.setViewportSize({ width: imgW + CONTROLS_W, height: imgH + HEADER_H });
 }
 
-// Re-render with the current window.__state. Task 8 exposes window.__redraw;
-// until then the window 'resize' listener in main.js calls redraw() directly.
-const REDRAW = `(window.__redraw || (() => window.dispatchEvent(new Event('resize'))))()`;
+// Re-render with the current window.__state (main.js exposes window.__redraw).
+const REDRAW = `window.__redraw()`;
 
 async function captureCanvas(page, fileName) {
   // Read canvas pixels via toDataURL — gets exactly what WebGL rendered at
@@ -79,6 +105,7 @@ test('WebGL render matches Python golden within tolerance', async ({ page }) => 
     s.ambient = 0.15;
     eval(redraw);
   }, REDRAW);
+  mark('lights applied + redraw');
   await page.waitForTimeout(300);
 
   const webglPng = await captureCanvas(page, 'webgl.png');
@@ -88,10 +115,9 @@ test('WebGL render matches Python golden within tolerance', async ({ page }) => 
   expect(webglPng.length).toBeGreaterThan(1000);
 });
 
-// Calibrated (metric) parity: same structure, feet-space light. Depends on
-// window.__applyCalibration / __syncMetricLights / __redraw from Task 8, so
-// it stays fixme until that lands.
-test.fixme('WebGL calibrated render matches Python golden within tolerance', async ({ page }) => {
+// Calibrated (metric) parity: same structure, feet-space light, driven through
+// window.__applyCalibration / __syncMetricLights / __redraw from main.js.
+test('WebGL calibrated render matches Python golden within tolerance', async ({ page }) => {
   test.skip(!fs.existsSync(FIXTURE) || !fs.existsSync(GOLDEN_CAL), 'fixtures missing');
 
   await uploadFixture(page);
@@ -111,6 +137,7 @@ test.fixme('WebGL calibrated render matches Python golden within tolerance', asy
     s.ambient = 0.1;
     window.__redraw();
   });
+  mark('calibrated lights applied + redraw');
   await page.waitForTimeout(300);
 
   const webglPng = await captureCanvas(page, 'webgl_calibrated.png');

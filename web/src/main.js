@@ -29,6 +29,10 @@ import { initTheme } from './theme.js';
 import { openNewScenePopup } from './new-scene-popup.js';
 import { openScenesListModal } from './scenes-list-modal.js';
 import { createSplitView } from './split-view.js';
+import {
+  solveRecord, syncLightFromFeet, syncLightFromEngine, migrateLightsToFeet, clearMetric,
+} from './metric/light-metric.js';
+import { worldToEngine } from './metric/calibration.js';
 import { mountPlacement2D } from './placement-pane-2d.js';
 
 const state = newState();
@@ -62,6 +66,13 @@ let saveTimer = null;
 
 function setStatus(t) { statusEl().textContent = t; }
 
+// The calibration record persists without the solved camera; it is re-solved
+// from the marks (and the image aspect) whenever the scene loads.
+function stripCamera(record) {
+  const { camera, ...rest } = record;
+  return rest;
+}
+
 function serializeSceneState() {
   return {
     tree: state.tree,
@@ -72,6 +83,8 @@ function serializeSceneState() {
     debugView: state.debugView,
     shadowStyle: state.shadowStyle,
     selectedId: state.selectedId,
+    calibration: state.calibration ? stripCamera(state.calibration) : null,
+    units: state.units || 'ft',
   };
 }
 
@@ -153,6 +166,8 @@ function commitPlacedLight(L, insertAt) {
   const where = insertAt || { parentArr: state.tree, index: state.tree.length };
   where.parentArr.splice(where.index, 0, L);
   state.selectedId = L.id;
+  // Click-placement produces engine-space coordinates; derive feet when calibrated.
+  if (state.calibration && L.type !== 'reflector') syncLightFromEngine(L, state.calibration);
   tree?.render();
   refreshProps();
   onChange();
@@ -161,9 +176,30 @@ function commitPlacedLight(L, insertAt) {
 function updatePlacedLight(L) {
   // Direction already derived by the controller; refresh props so the targeting
   // toggle reflects the new target, then sync + save.
+  if (state.calibration && L.type !== 'reflector') syncLightFromEngine(L, state.calibration);
   refreshProps();
   onChange();
 }
+
+// 2D handle drags edit position/target in engine space. Find the lights whose
+// engine position (or target) no longer matches their metric proxy and
+// re-derive their feet fields. Lights without a projection (position_eng null,
+// e.g. FOH lights behind the camera plane) keep their feet position.
+const vecEq = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length
+  && a.every((v, i) => v === b[i]);
+function syncDraggedLights() {
+  const cal = state.calibration;
+  if (!cal || !cal.depth_fit) return;
+  for (const L of state.lights) {
+    if (L.type === 'reflector' || !L.position_eng) continue;
+    const targetEng = L.target_ft ? worldToEngine(L.target_ft, cal.camera, cal.depth_fit) : null;
+    const moved = !vecEq(L.position, L.position_eng)
+      || (Array.isArray(L.target) && targetEng && !vecEq(L.target, targetEng))
+      || (Array.isArray(L.target) !== Boolean(L.target_ft));
+    if (moved) syncLightFromEngine(L, cal);
+  }
+}
+const onHandlesChange = () => { syncDraggedLights(); redrawAndSave(); };
 
 function removePlacedLight(L) {
   deleteNode(state.tree, L.id);
@@ -244,7 +280,7 @@ const onChange = () => {
   invalidatePolish();
   syncLights(state);
   if (state.sessionId) {
-    handlesAPI = mountHandles(state, redrawAndSave, onCanvasSelect);
+    handlesAPI = mountHandles(state, onHandlesChange, onCanvasSelect);
     redraw();
   }
   syncLightsToScene(state.lights, state.selectedId);
@@ -318,6 +354,12 @@ async function applyScene(scene) {
   state.height = scene.height;
   state.assetUrls = scene.assets;
 
+  // Calibration persists without the solved camera; re-solve against this
+  // image's aspect and make sure every light carries feet coordinates.
+  state.units = s.units || 'ft';
+  state.calibration = s.calibration ? solveRecord(s.calibration, state.height / state.width) : null;
+  if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
+
   tree.render();
   refreshProps();
 
@@ -328,7 +370,7 @@ async function applyScene(scene) {
     await setAssets(state.assetUrls, canvas);
     await loadScene3D({ assetUrls: state.assetUrls });
     depthSampler = createDepthSampler(state.assetUrls.depth_png_url);
-    handlesAPI = mountHandles(state, redrawAndSave, onCanvasSelect);
+    handlesAPI = mountHandles(state, onHandlesChange, onCanvasSelect);
     redraw();
     syncLightsToScene(state.lights, state.selectedId);   // initial population
   }
@@ -413,6 +455,7 @@ async function setupPolishUI() {
       ambientSubject: state.ambientLinked === false ? state.ambientSubject : null,
       ambientBackground: state.ambientLinked === false ? state.ambientBackground : null,
       shadowStyle: state.shadowStyle || 'off',
+      calibration: state.calibration ? stripCamera(state.calibration) : null,
     });
   });
 
@@ -524,6 +567,17 @@ document.addEventListener('keydown', (e) => {
       // Targeted lights derive direction from target - position; recompute after
       // any target OR position change so the beam tracks live.
       applyTargeting(L);
+      // Metric sync: feet patches (Task 11's 3D side) are authoritative for
+      // feet; engine patches (today's gizmo drags) re-derive feet from engine.
+      if (state.calibration && L.type !== 'reflector') {
+        if (patch.position_ft) {
+          L.position_ft = patch.position_ft;
+          if ('target_ft' in patch) L.target_ft = patch.target_ft;
+          syncLightFromFeet(L, state.calibration);
+        } else {
+          syncLightFromEngine(L, state.calibration);
+        }
+      }
       onChange();
     },
     placement,
@@ -710,6 +764,7 @@ document.getElementById('export-btn').addEventListener('click', async () => {
     shadow_style: state.shadowStyle || 'off',
     output_format: 'png',
     output_bit_depth: 8,
+    calibration: state.calibration ? stripCamera(state.calibration) : null,
   };
   const blob = await serverRender(body);
   const url = URL.createObjectURL(blob);
@@ -735,6 +790,7 @@ document.getElementById('export-layers-btn').addEventListener('click', async () 
       ambient_background: state.ambientLinked === false ? state.ambientBackground : null,
       shadow_style: state.shadowStyle || 'off',
       scene_name: state.sceneName || '',
+      calibration: state.calibration ? stripCamera(state.calibration) : null,
     };
     const { blob, filename } = await renderLayers(body);
     const url = URL.createObjectURL(blob);
@@ -779,3 +835,18 @@ function uniqueName(prefix) {
 }
 
 window.__state = state;  // for console debugging
+
+// ─── Stage calibration ────────────────────────────────────────────────────
+// Install (or remove, with null) a calibration record: solve the camera for
+// this image, give every light feet coordinates, notify listeners, redraw+save.
+function applyCalibration(record) {
+  state.calibration = record ? solveRecord(record, state.height / state.width) : null;
+  if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
+  else for (const L of state.lights) clearMetric(L);
+  document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
+  redrawAndSave();
+}
+// Hooks for the parity spec and console use.
+window.__applyCalibration = () => applyCalibration(state.calibration);
+window.__syncMetricLights = () => { if (state.calibration) migrateLightsToFeet(state.lights, state.calibration); };
+window.__redraw = () => redraw();

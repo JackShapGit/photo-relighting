@@ -249,6 +249,8 @@ export function newState() {
     subjectMedianDepth: 0.3,              // populated from prepare metadata
     selectedId: key.id,                   // Key still selected first
     theme: 'dark',
+    calibration: null,                    // stage calibration record (+ solved camera) or null
+    units: 'ft',                          // display units for feet values: 'ft' | 'm'
   };
   syncLights(state);
   return state;
