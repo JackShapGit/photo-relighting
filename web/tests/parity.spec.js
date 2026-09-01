@@ -6,10 +6,11 @@ const FIXTURE = path.resolve('packages/relighting_engine/tests/fixtures/images/p
 const GOLDEN = path.resolve('packages/relighting_engine/tests/fixtures/expected/portrait_a__single_directional.png');
 const GOLDEN_CAL = path.resolve('packages/relighting_engine/tests/fixtures/expected/portrait_a__calibrated_foh_spot.png');
 
-// Layout constants from playground.css / playground.html:
-//   header height: 44px, controls sidebar width: 320px
-const HEADER_H = 44;
-const CONTROLS_W = 320;
+// Tolerance for WebGL vs Python: per-pixel YIQ threshold 0.1, at most 2 % of
+// pixels may differ. The goldens under fixtures/expected are the snapshots
+// (see snapshotPathTemplate in playwright.config.js); the names are passed as
+// path segments because a string name gets its underscores sanitized to dashes.
+const PARITY = { maxDiffPixelRatio: 0.02, threshold: 0.1 };
 
 // Each parity test runs a real /prepare (depth + segmentation) and builds the
 // 3D point cloud under software GL; the default 30 s budget is too tight and
@@ -48,13 +49,24 @@ async function uploadFixture(page) {
   // moment to finish before touching lights.
   await page.waitForTimeout(1500);
 
-  // Read the prepared image dimensions and resize the viewport so the canvas
-  // is exactly width×height — no scaling artefacts in the parity comparison.
-  const { imgW, imgH } = await page.evaluate(() => ({
-    imgW: window.__state.width,
-    imgH: window.__state.height,
-  }));
-  await page.setViewportSize({ width: imgW + CONTROLS_W, height: imgH + HEADER_H });
+  // Size the viewport so the stage is exactly imgW × imgH: measure the chrome
+  // around #stage (header, tree pane, props pane, borders) instead of assuming
+  // fixed widths, then let fitCanvasWrap letterbox to the image aspect, which
+  // at an exact match yields a canvas of imgW × imgH — the golden's size.
+  const { imgW, imgH, extraW, extraH } = await page.evaluate(() => {
+    const st = document.getElementById('stage').getBoundingClientRect();
+    return {
+      imgW: window.__state.width, imgH: window.__state.height,
+      extraW: Math.round(window.innerWidth - st.width),
+      extraH: Math.round(window.innerHeight - st.height),
+    };
+  });
+  await page.setViewportSize({ width: imgW + extraW, height: imgH + extraH });
+  await page.waitForFunction(({ w, h }) => {
+    const c = document.getElementById('canvas');
+    return c.width === w && c.height === h;
+  }, { w: imgW, h: imgH }, { timeout: 10000 });
+  mark(`scene ready, canvas ${imgW}x${imgH}`);
 }
 
 // Re-render with the current window.__state (main.js exposes window.__redraw).
@@ -63,11 +75,13 @@ const REDRAW = `window.__redraw()`;
 async function captureCanvas(page, fileName) {
   // Read canvas pixels via toDataURL — gets exactly what WebGL rendered at
   // the canvas's native pixel dimensions (imgW × imgH after viewport resize).
+  // The canvas is sRGB-encoded by relight.frag, like the Python goldens.
   const dataUrl = await page.evaluate(() =>
     document.getElementById('canvas').toDataURL('image/png')
   );
   const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
   const webglPng = Buffer.from(base64, 'base64');
+  // Keep a copy for debugging diffs by hand.
   const tmp = path.resolve(`test-results/${fileName}`);
   fs.mkdirSync(path.dirname(tmp), { recursive: true });
   fs.writeFileSync(tmp, webglPng);
@@ -109,10 +123,7 @@ test('WebGL render matches Python golden within tolerance', async ({ page }) => 
   await page.waitForTimeout(300);
 
   const webglPng = await captureCanvas(page, 'webgl.png');
-
-  // Exact parity is checked by scripts/parity_check.py (run separately).
-  // Here we just confirm a real image was captured.
-  expect(webglPng.length).toBeGreaterThan(1000);
+  expect(webglPng).toMatchSnapshot(['portrait_a__single_directional.png'], PARITY);
 });
 
 // Calibrated (metric) parity: same structure, feet-space light, driven through
@@ -128,12 +139,12 @@ test('WebGL calibrated render matches Python golden within tolerance', async ({ 
     s.calibration = { version: 1, units: 'ft', width_ft: 40, height_ft: 20, depth_ft: 30,
       marks: { lipL: [0.1, 0.61333], lipR: [0.9, 0.61333], top: [0.5, 0.08], backL: [0.23333, 0.54222], backR: [0.76667, 0.54222] },
       depth_fit: { a: -0.027778, b: 0.030556 }, depth_check: null };
-    window.__applyCalibration();   // Task 8 exposes this: solves camera, syncs lights
+    window.__applyCalibration();   // solves the camera, syncs lights
     s.lights = [{ type: 'spotlight', position: [0.5, 0.2, 1.0], direction: [0, 0.3, -1],
       position_ft: [0, 20, -60], target_ft: [0, 5, 10], intensity: 6.0, falloff: 1.0,
       cone_angle: 0.6, softness: 0.1, color: [1,1,1], color_temperature: null, gel_preset: null,
       gobo: null, affects: 'all', enabled: true }];
-    window.__syncMetricLights();   // Task 8 exposes this
+    window.__syncMetricLights();
     s.ambient = 0.1;
     window.__redraw();
   });
@@ -141,5 +152,5 @@ test('WebGL calibrated render matches Python golden within tolerance', async ({ 
   await page.waitForTimeout(300);
 
   const webglPng = await captureCanvas(page, 'webgl_calibrated.png');
-  expect(webglPng.length).toBeGreaterThan(1000);
+  expect(webglPng).toMatchSnapshot(['portrait_a__calibrated_foh_spot.png'], PARITY);
 });

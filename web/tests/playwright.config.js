@@ -2,6 +2,10 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
+  // The Python goldens ARE the parity snapshots (no copies); never let
+  // --update-snapshots overwrite them from a Playwright run.
+  snapshotPathTemplate: '{testDir}/../../packages/relighting_engine/tests/fixtures/expected/{arg}{ext}',
+  updateSnapshots: 'none',
   use: {
     headless: true,
     viewport: { width: 1024, height: 768 },
