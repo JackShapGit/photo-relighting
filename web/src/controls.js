@@ -313,7 +313,9 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
       syncLightFromFeet(L, state.calibration);
       applyTargeting(L);
       e.target.value = toDisplay(ft, units).toFixed(1);
-      redraw();
+      // The engine position changed too, so the 2D handles must be remounted
+      // (the structural path also syncs the 3D scene and saves).
+      if (onStructural) onStructural(); else redraw();
     });
     ['x', 'y', 'z'].forEach((ax, i) => {
       bindFt(`.pos-${ax}`, 'position_ft', i);

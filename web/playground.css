@@ -996,3 +996,63 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 .metric-pos legend, .metric-tgt legend { font-size: 11px; color: var(--text-muted); padding: 0 4px; }
 .metric-pos label, .metric-tgt label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; margin: 3px 0; }
 .metric-pos input, .metric-tgt input { width: 84px; }
+
+/* ─── Stage calibration panel + five-click marking overlay ─────────────── */
+/* Both live inside #canvas-wrap so marker (u, v) maps to the photo exactly. */
+#calib-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  background: rgba(0, 0, 0, 0.8);
+  color: #ddd;
+  padding: 10px;
+  border-radius: 6px;
+  width: 260px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#calib-panel[hidden] { display: none !important; }
+#calib-panel h3 { margin: 0 0 4px; font-size: 13px; }
+#calib-panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#calib-panel input[type="number"] { width: 90px; }
+#calib-panel .cal-units { align-self: flex-start; }
+#calib-panel .cal-prompt {
+  background: var(--accent, #4a7);
+  color: #fff;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+#calib-panel .cal-errors { margin: 0; padding-left: 16px; color: #f88; }
+#calib-panel .cal-errors:empty { display: none; }
+#calib-panel .cal-warn { color: #fc6; }
+#calib-panel .cal-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+#calib-panel button { font-size: 12px; }
+
+#calib-overlay { position: absolute; inset: 0; z-index: 5; cursor: crosshair; }
+#calib-overlay[hidden] { display: none !important; }
+.cal-marker {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px;
+  border-radius: 50%;
+  background: var(--accent, #4a7);
+  border: 2px solid #fff;
+  cursor: grab;
+  touch-action: none;
+  box-sizing: border-box;
+}
+.cal-marker.is-dragging { cursor: grabbing; }
+.cal-marker::after {
+  content: attr(data-key);
+  position: absolute;
+  top: 14px;
+  left: 8px;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #fff;
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
+}

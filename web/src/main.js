@@ -34,6 +34,7 @@ import {
 } from './metric/light-metric.js';
 import { worldToEngine } from './metric/calibration.js';
 import { toDisplay } from './metric/units.js';
+import { mountCalibrationPanel } from './metric/calibration-panel.js';
 import { mountPlacement2D } from './placement-pane-2d.js';
 
 const state = newState();
@@ -892,5 +893,23 @@ unitToggle?.addEventListener('click', (e) => {
   const b = e.target.closest('[data-unit]');
   if (b) applyUnits(b.dataset.unit);
 });
-document.addEventListener('relight:calibration', updateBadge);
+// Calibration changes swap the props pane between engine-space and feet
+// controls, so re-render it along with the badge.
+document.addEventListener('relight:calibration', () => { updateBadge(); refreshProps(); });
 applyUnits(state.units);
+
+// ─── Calibration panel (five-click marking) ───────────────────────────────
+const calibPanel = mountCalibrationPanel({
+  panelEl: document.getElementById('calib-panel'),
+  overlayEl: document.getElementById('calib-overlay'),
+  canvasWrapEl: document.getElementById('canvas-wrap'),
+  getState: () => state,
+  sampleDepth: (u, v) => depthSampler?.sample(u, v) ?? NaN,
+  onApply: applyCalibration,
+  onClear: () => applyCalibration(null),
+  onCrossCheck: null,   // Task 13: server-side depth cross-check hook
+});
+calibrateBtn?.addEventListener('click', () => {
+  if (!state.sessionId) return;
+  calibPanel?.open();
+});
