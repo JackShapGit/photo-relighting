@@ -15,6 +15,7 @@ The GLSL fragment shader in web/src/webgl/shaders/relight.frag mirrors this exac
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 from typing import Sequence
 
@@ -27,6 +28,9 @@ from relighting_engine.lighting.gels import resolve_color
 from relighting_engine.lighting.gobo import project_uv
 from relighting_engine.lighting.models import Light
 from relighting_engine.lighting.reflectors import compute_reflector_emission
+from relighting_engine.metric.calibration import (
+    Calibration, depth_to_zcam, engine_dir_to_world, falloff_to_metric, pixel_to_world, world_to_engine,
+)
 
 
 def _make_world_pos(h: int, w: int, depth: torch.Tensor) -> torch.Tensor:
@@ -35,6 +39,38 @@ def _make_world_pos(h: int, w: int, depth: torch.Tensor) -> torch.Tensor:
     xs = torch.linspace(0.0, 1.0, w, device=depth.device, dtype=depth.dtype)
     Y, X = torch.meshgrid(ys, xs, indexing="ij")
     return torch.stack([X, Y, depth], dim=-1)
+
+
+def _make_metric_pos(h: int, w: int, depth: torch.Tensor, cal: Calibration) -> torch.Tensor:
+    """(H, W, 3) positions in feet. Mirrors relight.frag metric_pixel_to_world."""
+    ys = torch.linspace(0.0, 1.0, h, device=depth.device, dtype=depth.dtype)
+    xs = torch.linspace(0.0, 1.0, w, device=depth.device, dtype=depth.dtype)
+    V, U = torch.meshgrid(ys, xs, indexing="ij")
+    cam = cal.camera
+    if cal.fit is None:
+        zc = cam.dist_ft + depth * cal.depth_ft
+    else:
+        inv = torch.clamp(cal.fit.a * depth + cal.fit.b, min=1.0 / 10000.0)
+        zc = torch.clamp(1.0 / inv, 0.5, 10000.0)
+    X = (U - cam.u_c) * zc / cam.f
+    Y = cam.k_y * (cam.height_ft - (V * cam.aspect - cam.va_h) * zc / cam.f)
+    Z = zc - cam.dist_ft
+    return torch.stack([X, Y, Z], dim=-1)
+
+
+def _metric_light_vectors(L: Light, cal: Calibration):
+    """Lighting-space (feet) position/direction plus the engine-space shadow proxy."""
+    pos_ft = L.position_ft if L.position_ft is not None else (0.0, 0.0, -cal.camera.dist_ft)
+    if L.target_ft is not None:
+        d = np.array(L.target_ft, dtype=np.float64) - np.array(pos_ft, dtype=np.float64)
+        n = np.linalg.norm(d)
+        dir_ft = tuple((d / n).tolist()) if n > 1e-9 else engine_dir_to_world(L.direction)
+    elif L.direction_ft is not None:
+        dir_ft = L.direction_ft
+    else:
+        dir_ft = engine_dir_to_world(L.direction)
+    proxy = world_to_engine(pos_ft, cal.camera, cal.fit) if cal.fit is not None else None
+    return pos_ft, dir_ft, proxy
 
 
 def _planar_shadow(
@@ -196,12 +232,20 @@ def render(
     device: str = "cuda",
     gobo_textures: dict[str, torch.Tensor] | None = None,
     shadow_style: str = "off",          # 'off' | 'heightfield' | 'planar'
+    calibration: Calibration | None = None,
 ) -> np.ndarray:
     """Render the prepared image under the given lights. Returns (H, W, 3) float32 in [0, 1].
 
     Per-zone ambient: pass `ambient_subject` / `ambient_background` to bias
     ambient by mask (e.g. to darken just the background). When either is None
     the global `ambient` value is used for that zone.
+
+    Metric mode (``calibration`` given): per-pixel positions are in feet in the
+    world frame, normals are flipped (x, -y, -z) into that frame, and lights use
+    ``position_ft`` / ``direction_ft`` / ``target_ft`` with ``falloff`` scaled by
+    1/width_ft². Shadows and orthographic gobos stay in engine space, marching
+    toward the engine-space proxy of the light (or along the engine direction
+    when no depth fit exists). Mirrors the ``u_metric`` branch of relight.frag.
     """
     h, w = prepared.height, prepared.width
     original = torch.from_numpy(prepared.original).to(device)
@@ -214,6 +258,12 @@ def render(
         mask = torch.ones((h, w), device=device, dtype=torch.float32)
 
     P = _make_world_pos(h, w, depth)
+    metric = calibration is not None
+    if metric:
+        Pw = _make_metric_pos(h, w, depth, calibration)
+        Nw = torch.stack([normals[..., 0], -normals[..., 1], -normals[..., 2]], dim=-1)
+    else:
+        Pw, Nw = P, normals
     a_subj = ambient_subject if ambient_subject is not None else ambient
     a_bg   = ambient_background if ambient_background is not None else ambient
     if has_mask and (a_subj != ambient or a_bg != ambient):
@@ -243,21 +293,50 @@ def render(
         L.validate()
         dir_vec = effective_direction(L)
 
+        # Lighting-space light (feet in metric mode, engine space otherwise)
+        # plus the engine-space shadow proxy. Same choices, same order, as the
+        # u_metric branch in relight.frag.
+        if metric:
+            pos_ft, dir_ft, proxy = _metric_light_vectors(L, calibration)
+            light_pos = torch.tensor(pos_ft, device=device, dtype=torch.float32)
+            light_dir = torch.tensor(dir_ft, device=device, dtype=torch.float32)
+            falloff = falloff_to_metric(L.falloff, calibration.width_ft)
+        else:
+            proxy = None
+            light_pos = torch.tensor(L.position, device=device, dtype=torch.float32)
+            light_dir = torch.tensor(dir_vec, device=device, dtype=torch.float32)
+            falloff = L.falloff
+
         if L.type == "directional":
-            d = torch.tensor(dir_vec, device=device, dtype=torch.float32)
-            d = d / (d.norm() + 1e-8)
-            L_vec = -d.expand_as(P)
+            d = light_dir / (light_dir.norm() + 1e-8)
+            L_vec = -d.expand_as(Pw)
             atten = torch.ones((h, w), device=device, dtype=torch.float32)
         else:
-            pos = torch.tensor(L.position, device=device, dtype=torch.float32)
-            diff_vec = pos - P
+            diff_vec = light_pos - Pw
             dist = diff_vec.norm(dim=-1, keepdim=True) + 1e-6
             L_vec = diff_vec / dist
-            atten = 1.0 / (1.0 + L.falloff * (dist.squeeze(-1) ** 2))
+            atten = 1.0 / (1.0 + falloff * (dist.squeeze(-1) ** 2))
+
+        # Engine-space vector for shadow marching. Metric: directional lights and
+        # lights without a projection (no depth fit) march along the negated
+        # engine direction; otherwise toward the engine-space proxy position.
+        if metric:
+            if L.type == "directional" or proxy is None:
+                d_eng = torch.tensor(L.direction, device=device, dtype=torch.float32)
+                d_eng = d_eng / (d_eng.norm() + 1e-8)
+                L_vec_eng = -d_eng.expand_as(P)
+                L_eng = dataclasses.replace(L, type="directional", target=None)
+            else:
+                proxy_t = torch.tensor(proxy, device=device, dtype=torch.float32)
+                diff_eng = proxy_t - P
+                L_vec_eng = diff_eng / (diff_eng.norm(dim=-1, keepdim=True) + 1e-6)
+                L_eng = dataclasses.replace(L, position=tuple(proxy), target=None)
+        else:
+            L_vec_eng = L_vec
+            L_eng = L
 
         if L.type == "spotlight":
-            d = torch.tensor(dir_vec, device=device, dtype=torch.float32)
-            d = d / (d.norm() + 1e-8)
+            d = light_dir / (light_dir.norm() + 1e-8)
             cone_dot = (d * (-L_vec)).sum(dim=-1)
             inner = math.cos(max(L.cone_angle - L.softness * 0.5, 1e-4))
             outer = math.cos(L.cone_angle + L.softness * 0.5)
@@ -266,7 +345,14 @@ def render(
             cone = torch.ones((h, w), device=device, dtype=torch.float32)
 
         if L.gobo is not None and L.gobo.texture_id in gobo_textures:
-            uv = project_uv(P, L)
+            if metric:
+                # Perspective/equirect project from the feet-space light onto
+                # feet-space P; ortho keeps engine-space P (relight.frag passes
+                # P with u_l_direction, i.e. the lighting-space direction).
+                L_gobo = dataclasses.replace(L, position=tuple(pos_ft), direction=tuple(dir_ft), target=None)
+                uv = project_uv(P if L.type == "directional" else Pw, L_gobo)
+            else:
+                uv = project_uv(P, L)
             # rotation, scale, offset around (0.5, 0.5)
             cx, cy = 0.5, 0.5
             uv_centered = uv - torch.tensor([cx, cy], device=device)
@@ -283,7 +369,7 @@ def render(
         else:
             g = torch.ones((h, w), device=device, dtype=torch.float32)
 
-        diff = torch.clamp((normals * L_vec).sum(dim=-1), min=0.0)
+        diff = torch.clamp((Nw * L_vec).sum(dim=-1), min=0.0)
 
         if L.affects == "all":
             mask_w = torch.ones((h, w), device=device, dtype=torch.float32)
@@ -293,10 +379,10 @@ def render(
             mask_w = 1.0 - mask
 
         if shadow_style == "heightfield":
-            shadow = _shadow_factor(P, depth, L_vec)
+            shadow = _shadow_factor(P, depth, L_vec_eng)
         elif shadow_style == "planar":
             subject_depth = float(prepared.metadata.get("subject_median_depth", 0.3))
-            shadow = _planar_shadow(P, depth, mask if prepared.mask is not None else None, L, subject_depth)
+            shadow = _planar_shadow(P, depth, mask if prepared.mask is not None else None, L_eng, subject_depth)
         else:
             shadow = torch.ones((h, w), device=device, dtype=torch.float32)
 

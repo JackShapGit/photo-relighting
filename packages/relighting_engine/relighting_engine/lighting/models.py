@@ -57,6 +57,11 @@ class Light:
     enabled: bool = True
     name: str = ""
 
+    # Metric (calibrated) fields — feet in the world frame. None when uncalibrated.
+    position_ft: tuple[float, float, float] | None = None
+    target_ft: tuple[float, float, float] | None = None
+    direction_ft: tuple[float, float, float] | None = None
+
     # Reflector-only fields (ignored for non-reflector types).
     normal: tuple[float, float, float] = (0.0, 0.0, -1.0)
     size: tuple[float, float] = (0.6, 0.4)

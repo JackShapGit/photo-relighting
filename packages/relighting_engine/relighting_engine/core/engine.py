@@ -16,6 +16,7 @@ from relighting_engine.depth.depth_anything import DepthAnythingBackend
 from relighting_engine.lighting.models import Light
 from relighting_engine.lighting.shaders import render as shader_render
 from relighting_engine.lighting.psd import deduplicate_names
+from relighting_engine.metric.calibration import Calibration
 from relighting_engine.normals.from_depth import normals_from_depth
 from relighting_engine.polish.backend import PolishBackend
 from relighting_engine.segmentation.rmbg import RMBGBackend
@@ -149,6 +150,7 @@ class RelightingEngine:
         shadow_style: str = "off",
         ambient_subject: float | None = None,
         ambient_background: float | None = None,
+        calibration: Calibration | None = None,
     ) -> np.ndarray:
         out = shader_render(
             prepared, lights, ambient=ambient,
@@ -156,6 +158,7 @@ class RelightingEngine:
             ambient_background=ambient_background,
             device=self.device, gobo_textures=self._gobos(),
             shadow_style=shadow_style,
+            calibration=calibration,
         )
         if output_resolution is not None:
             import cv2
