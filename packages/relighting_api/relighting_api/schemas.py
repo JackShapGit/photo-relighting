@@ -5,11 +5,41 @@ These models 422 on bad input; conversion to engine dataclasses happens via
 """
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from relighting_engine.lighting.models import Gobo, Light
+from relighting_engine.metric.calibration import Calibration
+
+_MARK_KEYS = ("lipL", "lipR", "top", "backL", "backR")
+
+
+class DepthFitModel(BaseModel):
+    a: float
+    b: float
+
+
+class CalibrationModel(BaseModel):
+    version: int = 1
+    units: Literal["ft", "m"] = "ft"
+    width_ft: Annotated[float, Field(gt=0.0)]
+    height_ft: Annotated[float, Field(gt=0.0)]
+    depth_ft: Annotated[float, Field(gt=0.0)]
+    marks: dict[str, list[float]]
+    depth_fit: DepthFitModel | None = None
+    depth_check: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _validate_marks(self) -> "CalibrationModel":
+        for k in _MARK_KEYS:
+            v = self.marks.get(k)
+            if not (isinstance(v, list) and len(v) == 2):
+                raise ValueError(f"marks.{k} must be [u, v]")
+        return self
+
+    def to_engine(self, aspect: float) -> Calibration:
+        return Calibration.from_dict(self.model_dump(), aspect)
 
 
 class GoboModel(BaseModel):
@@ -47,10 +77,21 @@ class LightModel(BaseModel):
     affects: Literal["all", "subject", "background"] = "all"
     enabled: bool = True
     name: str = ""
+    position_ft: list[float] | None = None
+    target_ft: list[float] | None = None
+    direction_ft: list[float] | None = None
     normal: list[float] = Field(default_factory=lambda: [0.0, 0.0, -1.0])
     size: list[float] = Field(default_factory=lambda: [0.6, 0.4])
     reflectance: Annotated[float, Field(ge=0.0, le=1.0)] = 0.7
     roughness: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
+
+    @model_validator(mode="after")
+    def _validate_ft(self) -> "LightModel":
+        for k in ("position_ft", "target_ft", "direction_ft"):
+            v = getattr(self, k)
+            if v is not None and len(v) != 3:
+                raise ValueError(f"{k} must have 3 components")
+        return self
 
     def to_engine(self) -> Light:
         l = Light(
@@ -69,6 +110,9 @@ class LightModel(BaseModel):
             affects=self.affects,
             enabled=self.enabled,
             name=self.name,
+            position_ft=tuple(self.position_ft) if self.position_ft else None,
+            target_ft=tuple(self.target_ft) if self.target_ft else None,
+            direction_ft=tuple(self.direction_ft) if self.direction_ft else None,
             normal=(self.normal[0], self.normal[1], self.normal[2]),
             size=(self.size[0], self.size[1]),
             reflectance=self.reflectance,
@@ -89,6 +133,7 @@ class RenderCommon(BaseModel):
     output_format: Literal["png", "jpeg", "tiff"] = "png"
     output_bit_depth: Literal[8, 16, 32] = 8
     output_resolution: list[int] | None = None
+    calibration: CalibrationModel | None = None
 
     @model_validator(mode="after")
     def _validate_format_bitdepth(self) -> "RenderCommon":
@@ -123,6 +168,7 @@ class RenderLayersRequest(BaseModel):
     shadow_style: Literal["off", "heightfield", "planar"] = "off"
     output_resolution: list[int] | None = None
     scene_name: str = ""
+    calibration: CalibrationModel | None = None
 
 
 class GoboPreset(BaseModel):

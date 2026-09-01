@@ -43,6 +43,7 @@ async def polish(req: PolishRequest, request: Request) -> Response:
         raise HTTPException(status_code=409, detail="polish already in flight")
 
     out_res = tuple(req.output_resolution) if req.output_resolution else None
+    calibration = req.calibration.to_engine(prepared.height / prepared.width) if req.calibration else None
     async with lock:
         try:
             arr = engine.polish(
@@ -53,6 +54,7 @@ async def polish(req: PolishRequest, request: Request) -> Response:
                 shadow_style=req.shadow_style,
                 prompt=req.prompt, seed=req.seed,
                 output_resolution=out_res,
+                calibration=calibration,
             )
         except torch.cuda.OutOfMemoryError as e:
             raise HTTPException(

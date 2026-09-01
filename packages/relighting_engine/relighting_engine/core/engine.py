@@ -175,6 +175,7 @@ class RelightingEngine:
         ambient_background: float | None = None,
         shadow_style: str = "off",
         output_resolution: tuple[int, int] | None = None,
+        calibration: Calibration | None = None,
     ) -> dict[str, np.ndarray]:
         """Render each enabled light as a separate layer."""
         gobos = self._gobos()
@@ -185,7 +186,7 @@ class RelightingEngine:
             ambient_subject=ambient_subject,
             ambient_background=ambient_background,
             device=self.device, gobo_textures=gobos,
-            shadow_style=shadow_style,
+            shadow_style=shadow_style, calibration=calibration,
         )
 
         enabled = [L for L in lights if L.enabled]
@@ -203,7 +204,7 @@ class RelightingEngine:
                 prepared, [L], ambient=0.0,
                 ambient_subject=0.0, ambient_background=0.0,
                 device=self.device, gobo_textures=gobos,
-                shadow_style=shadow_style,
+                shadow_style=shadow_style, calibration=calibration,
             )
             layers[name] = layer
 
@@ -213,14 +214,14 @@ class RelightingEngine:
                 prepared, emitters, ambient=0.0,
                 ambient_subject=0.0, ambient_background=0.0,
                 device=self.device, gobo_textures=gobos,
-                shadow_style=shadow_style,
+                shadow_style=shadow_style, calibration=calibration,
             )
             for R, name in zip(reflectors, deduped[len(emitters):]):
                 with_refl = shader_render(
                     prepared, emitters + [R], ambient=0.0,
                     ambient_subject=0.0, ambient_background=0.0,
                     device=self.device, gobo_textures=gobos,
-                    shadow_style=shadow_style,
+                    shadow_style=shadow_style, calibration=calibration,
                 )
                 layer = np.clip(with_refl - emitter_only, 0.0, 1.0)
                 layers[name] = layer
@@ -248,17 +249,20 @@ class RelightingEngine:
         prompt: str = "",
         seed: int | None = None,
         output_resolution: tuple[int, int] | None = None,
+        calibration: Calibration | None = None,
     ) -> np.ndarray:
         """Run the classical render, then refine with SD1.5 img2img.
 
         Returns HxWx3 float32 linear-sRGB in [0,1]. Output dimensions match
         prepared.height × prepared.width unless output_resolution is given.
+        Only the classical pre-render uses ``calibration``.
         """
         classical = self.render(
             prepared, lights, ambient=ambient,
             ambient_subject=ambient_subject,
             ambient_background=ambient_background,
             output_resolution=None, shadow_style=shadow_style,
+            calibration=calibration,
         )
 
         polisher = self._get_polisher()
