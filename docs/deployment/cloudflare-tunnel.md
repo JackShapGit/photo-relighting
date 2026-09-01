@@ -1,6 +1,6 @@
 # Cloudflare Tunnel — demo access runbook
 
-Expose `localhost:8000` at `https://relight.<yourdomain>` for occasional
+Expose `localhost:8001` at `https://relight.<yourdomain>` for occasional
 demos, gated by a shared password. Reflects the design in
 `docs/superpowers/specs/2026-05-21-cloudflare-tunnel-demo-access-design.md`.
 
@@ -48,7 +48,7 @@ tunnel: <UUID-from-step-4>
 credentials-file: C:\Users\Owner\.cloudflared\<UUID>.json
 ingress:
   - hostname: relight.<yourdomain>
-    service: http://localhost:8000
+    service: http://localhost:8001
   - service: http_status:404
 ```
 
@@ -109,7 +109,7 @@ No tunnel restart needed.
 .\start-demo.bat
 ```
 
-Uvicorn starts on `127.0.0.1:8000`. Share with the audience:
+Uvicorn starts on `127.0.0.1:8001`. Share with the audience:
 - URL: `https://relight.<yourdomain>`
 - Username: anything
 - Password: the value in `.env.demo`
@@ -141,10 +141,10 @@ If `https://relight.<yourdomain>` does not work, walk this ladder:
 
    Expect a CNAME to `<UUID>.cfargotunnel.com`.
 
-3. **Is the app on :8000?**
+3. **Is the app on :8001?**
 
    ```powershell
-   curl.exe -i -u demo:$env:RELIGHT_DEMO_PASSWORD http://127.0.0.1:8000/healthz
+   curl.exe -i -u demo:$env:RELIGHT_DEMO_PASSWORD http://127.0.0.1:8001/healthz
    ```
 
    Expect HTTP 200. If 401, the password in your shell does not match the
