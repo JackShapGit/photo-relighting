@@ -253,6 +253,15 @@ test('solveCamera recovers the synthetic camera', () => {
   near(cam.u_c, 0.5, 1e-9);
   near(cam.va_h, 0.3, 0.002);
   assert.ok(cam.height_check_pct < 1);
+  near(cam.perspective_ratio, 2 / 3, 1e-3);
+});
+
+test('solveCamera flags a shallow stage via perspective_ratio', () => {
+  // 10 ft deep stage seen from 60 ft: back line is 60/70 of the lip width.
+  const shallow = { ...record, depth_ft: 10, marks: { ...record.marks, backL: [0.5 - 0.4 * 60 / 70, 0.6], backR: [0.5 + 0.4 * 60 / 70, 0.6] } };
+  const cam = solveCamera(shallow, aspect);
+  nearPct(cam.dist_ft, 60, 1);
+  assert.ok(cam.perspective_ratio > 0.85);
 });
 
 test('pixelToWorld puts the lip corners on the deck at ±20 ft, Z = 0', () => {
@@ -394,6 +403,7 @@ export function solveCamera(record, aspect) {
     f, dist_ft: dist, height_ft: h, u_c: (m.lipL[0] + m.lipR[0]) / 2,
     va_h: vaH, k_y: kY, aspect,
     height_check_pct: Math.abs(kY - 1) * 100,
+    perspective_ratio: r,     // back-line width / lip width; > 0.9 means a shallow stage relative to camera distance
   };
 }
 
@@ -1605,6 +1615,7 @@ const cam = solveCamera(rec, height / width);
 rec.depth_fit = fitDepth(rec, cam, sampleDepth);
 const warns = [];
 if (cam.height_check_pct > 10) warns.push(`Photo implies an opening height ${cam.height_check_pct.toFixed(0)}% different from what you entered; check the top mark.`);
+if (cam.perspective_ratio > 0.9) warns.push('Stage depth is small relative to the camera distance, so upstage distances are sensitive to the back-line marks. Place them carefully.');
 if (!rec.depth_fit) warns.push('Depth map has no usable relief between lip and back line; upstage distances fall back to a linear estimate.');
 showWarnings(warns);
 onApply(rec);
