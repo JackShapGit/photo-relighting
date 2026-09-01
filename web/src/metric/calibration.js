@@ -97,13 +97,27 @@ export function fitDepth(record, cam, sampleDepth) {
   return { a, b };
 }
 
+/**
+ * The depth mapping a solved record actually uses: the fitted inverse-depth
+ * line when fitDepth found one, otherwise the spec's linear fallback (pixel
+ * depth scaled to the stage depth, zCam = dist_ft + d·depth_ft), which is
+ * what the shader applies when u_fit.z = 0. Every JS geometry path goes
+ * through this so no-fit scenes behave the same everywhere.
+ */
+export function effectiveFit(record) {
+  if (record.depth_fit) return record.depth_fit;
+  return { linear: true, dist_ft: record.camera.dist_ft, depth_ft: record.depth_ft };
+}
+
 export function depthToZcam(d, fit) {
-  const inv = fit.a * d + fit.b;
-  const z = 1 / Math.max(inv, 1 / Z_CAM_MAX);
+  const z = fit.linear
+    ? fit.dist_ft + d * fit.depth_ft
+    : 1 / Math.max(fit.a * d + fit.b, 1 / Z_CAM_MAX);
   return Math.min(Z_CAM_MAX, Math.max(Z_CAM_MIN, z));
 }
 
 export function zcamToDepth(zCam, fit) {
+  if (fit.linear) return (zCam - fit.dist_ft) / fit.depth_ft;
   return (1 / zCam - fit.b) / fit.a;
 }
 

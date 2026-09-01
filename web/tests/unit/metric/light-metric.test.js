@@ -44,6 +44,22 @@ test('migrateLightsToFeet only touches lights without position_ft', () => {
   assert.deepEqual(b.position_ft, [1, 2, 3]);
 });
 
+test('a record with no depth fit still migrates lights (linear depth fallback)', () => {
+  const noFit = solveRecord({ ...SYNTHETIC_STAGE.record, depth_fit: null }, SYNTHETIC_STAGE.aspect);
+  const L = { type: 'spotlight', position: [0.5, 0.6, 0.8], direction: [0, 0, -1], target: [0.5, 0.5, 0.65], falloff: 1 };
+  migrateLightsToFeet([L], noFit);
+  assert.ok(Array.isArray(L.position_ft) && Array.isArray(L.target_ft), 'feet fields exist');
+  assert.ok(Array.isArray(L.position_eng), 'engine proxy exists without a fit');
+  // Engine z = 0.8 → d = 0.2 → Z = 0.2 · 30 ft = 6 ft upstage of the lip.
+  near(L.position_ft[2], 6, 1e-6);
+  near(L.position_eng[2], 0.8, 1e-9);
+  assert.deepEqual(L.position, L.position_eng);
+  // And the feet → engine direction agrees with the shader's linear rule.
+  const M = { type: 'point', position: [0, 0, 0], direction: [0, 0, -1], target: null, falloff: 1, position_ft: [0, 5, 15] };
+  syncLightFromFeet(M, noFit);
+  near(M.position_eng[2], 1 - 15 / 30, 1e-9);
+});
+
 test('clearMetric removes metric fields', () => {
   const L = { position_ft: [1, 2, 3], target_ft: [0, 0, 0], direction_ft: [0, 0, 1], position_eng: [0.5, 0.5, 0.5], direction_eng: [0, 0, -1], falloff_ft: 0.1 };
   clearMetric(L);

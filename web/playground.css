@@ -1015,6 +1015,11 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
   border-color: var(--accent, #4a7);
   color: var(--accent, #4a7);
 }
+/* Calibrated without a usable depth fit: upstage distances are a linear estimate. */
+.calib-badge.is-calibrated.is-no-fit {
+  border-color: #fc6;
+  color: #fc6;
+}
 
 /* ─── Metric position fields in the props pane ─────────────────────────── */
 .metric-pos, .metric-tgt {

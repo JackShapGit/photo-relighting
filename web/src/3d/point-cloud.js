@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 
 import { Z_SCALE, pixelToWorld, worldFtToThree } from './coords.js';
-import { depthToZcam, pixelToWorld as pixelToWorldFt } from '../metric/calibration.js';
+import { depthToZcam, effectiveFit, pixelToWorld as pixelToWorldFt } from '../metric/calibration.js';
 
 const MAX_POINTS = 1_000_000;
 const _tmp = new THREE.Vector3();
@@ -103,6 +103,7 @@ export async function buildPointCloud({ originalUrl, depthUrl, sourceCanvas2D, z
   const D = calibration?.depth_ft ?? 0;
   const Wft = calibration?.width_ft ?? 0;
   const Hft = calibration?.height_ft ?? 0;
+  const fit = calibration ? effectiveFit(calibration) : null;
 
   let i = 0;
   for (let r = 0; r < H; r += stride) {
@@ -113,8 +114,7 @@ export async function buildPointCloud({ originalUrl, depthUrl, sourceCanvas2D, z
       if (calibration) {
         // Calibrated: per-pixel position in feet via the same camera model the
         // shader uses (metric_pixel_to_world), then into the Three frame.
-        const fit = calibration.depth_fit;
-        const zc = fit ? depthToZcam(d, fit) : calibration.camera.dist_ft + d * calibration.depth_ft;
+        const zc = depthToZcam(d, fit);      // fitted, or the linear fallback without a fit
         const [X, Y, Z] = pixelToWorldFt(c / (W - 1), r / (H - 1), zc, calibration.camera);
         [x, y, z] = worldFtToThree([X, Y, Z]);
         if (Z >= -0.5 * D && Z <= 2 * D && Math.abs(X) <= 1.5 * Wft && Y >= -0.5 * Hft && Y <= 3 * Hft) {

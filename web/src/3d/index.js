@@ -12,7 +12,7 @@ import { bindHotkeys } from './hotkeys.js';
 import { isTargeted } from '../targeting.js';
 import { createTargetViz } from './target-viz.js';
 import { buildStage, removeStage, updateStageUnits } from './stage.js';
-import { worldToEngine } from '../metric/calibration.js';
+import { worldToEngine, effectiveFit } from '../metric/calibration.js';
 
 let api = null;
 let currentPointCloud = null;
@@ -141,7 +141,7 @@ function placementEngPoint(e) {
   if (metricCal) {
     // The placement controller works in engine space; project the feet-space
     // hit through the calibration (null when the point has no projection).
-    return worldToEngine(threeToWorldFt([hit.x, hit.y, hit.z]), metricCal.camera, metricCal.depth_fit);
+    return worldToEngine(threeToWorldFt([hit.x, hit.y, hit.z]), metricCal.camera, effectiveFit(metricCal));
   }
   return worldToLight([hit.x, hit.y, hit.z]);
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   validateMarks, solveCamera, pixelToWorld, worldToPixel, fitDepth,
   depthToZcam, zcamToDepth, worldToEngine, engineToWorld,
-  engineDirToWorld, worldDirToEngine, falloffToMetric, SYNTHETIC_STAGE,
+  engineDirToWorld, worldDirToEngine, falloffToMetric, effectiveFit, SYNTHETIC_STAGE,
 } from '../../../src/metric/calibration.js';
 
 const near = (a, b, tol = 1e-6) => assert.ok(Math.abs(a - b) <= tol, `${a} !~ ${b}`);
@@ -136,4 +136,38 @@ test('direction transforms flip y and z', () => {
 
 test('falloffToMetric divides by width squared', () => {
   near(falloffToMetric(1.0, record), 1 / 1600, 1e-12);
+});
+
+// ── No depth fit: linear fallback (spec §Error handling) ──
+// zCam = dist_ft + d·depth_ft, the same rule the shader applies when u_fit.z = 0.
+
+test('effectiveFit returns the fitted a/b when present, else a linear descriptor', () => {
+  const cam = solveCamera(record, aspect);
+  const fitted = { ...record, camera: cam, depth_fit: { a: -0.037037, b: 0.024074 } };
+  assert.deepEqual(effectiveFit(fitted), { a: -0.037037, b: 0.024074 });
+  const lin = effectiveFit({ ...record, camera: cam, depth_fit: null });
+  assert.equal(lin.linear, true);
+  near(lin.dist_ft, cam.dist_ft, 1e-12);
+  near(lin.depth_ft, 30, 1e-12);
+});
+
+test('depthToZcam linear: d = 0 is the lip plane, d = 1 is the back line', () => {
+  const cam = solveCamera(record, aspect);
+  const lin = effectiveFit({ ...record, camera: cam, depth_fit: null });
+  near(depthToZcam(0, lin), cam.dist_ft, 1e-9);
+  near(depthToZcam(1, lin), cam.dist_ft + 30, 1e-9);
+  assert.ok(depthToZcam(-1000, lin) >= 0.5 && depthToZcam(1e6, lin) <= 10000, 'still clamped');
+});
+
+test('zcamToDepth / depthToZcam and worldToEngine / engineToWorld round trip with the linear fit', () => {
+  const cam = solveCamera(record, aspect);
+  const lin = effectiveFit({ ...record, camera: cam, depth_fit: null });
+  near(zcamToDepth(depthToZcam(0.37, lin), lin), 0.37, 1e-9);
+  const w = [5, 4, 10];
+  const e = worldToEngine(w, cam, lin);
+  assert.ok(e[0] > 0 && e[0] < 1 && e[1] > 0 && e[1] < 1);
+  near(e[2], 1 - 10 / 30, 1e-9);                     // Z = 10 ft of a 30 ft stage → d = 1/3
+  const back = engineToWorld(e, cam, lin);
+  near(back[0], 5, 1e-6); near(back[1], 4, 1e-6); near(back[2], 10, 1e-6);
+  assert.equal(worldToEngine([0, 20, -70], cam, lin), null);
 });

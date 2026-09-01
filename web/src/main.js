@@ -33,7 +33,7 @@ import { createSplitView } from './split-view.js';
 import {
   solveRecord, syncLightFromFeet, syncLightFromEngine, migrateLightsToFeet, clearMetric,
 } from './metric/light-metric.js';
-import { worldToEngine } from './metric/calibration.js';
+import { worldToEngine, effectiveFit } from './metric/calibration.js';
 import { toDisplay } from './metric/units.js';
 import { mountCalibrationPanel } from './metric/calibration-panel.js';
 import { mountPlacement2D } from './placement-pane-2d.js';
@@ -192,10 +192,11 @@ const vecEq = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.l
   && a.every((v, i) => v === b[i]);
 function syncDraggedLights() {
   const cal = state.calibration;
-  if (!cal || !cal.depth_fit) return;
+  if (!cal) return;
+  const fit = effectiveFit(cal);          // linear fallback when there is no depth fit
   for (const L of state.lights) {
     if (L.type === 'reflector' || !L.position_eng) continue;
-    const targetEng = L.target_ft ? worldToEngine(L.target_ft, cal.camera, cal.depth_fit) : null;
+    const targetEng = L.target_ft ? worldToEngine(L.target_ft, cal.camera, fit) : null;
     const moved = !vecEq(L.position, L.position_eng)
       || (Array.isArray(L.target) && targetEng && !vecEq(L.target, targetEng))
       || (Array.isArray(L.target) !== Boolean(L.target_ft));
@@ -890,19 +891,23 @@ const unitToggle = document.getElementById('unit-toggle');
 const calibrateBtn = document.getElementById('calibrate-btn');
 try { state.units = localStorage.getItem(UNITS_KEY) === 'm' ? 'm' : 'ft'; } catch {}
 
+const NO_FIT_TITLE = 'No usable depth relief between the lip and back-line marks: upstage distances use a linear estimate (click to edit)';
 function formatBadge(rec) {
   if (!rec) return 'Calibrate';
   const u = state.units || 'ft';
   const f = (ft) => toDisplay(ft, u).toFixed(1).replace(/\.0$/, '');
-  return `${f(rec.width_ft)} × ${f(rec.height_ft)} × ${f(rec.depth_ft)} ${u}`;
+  const warn = rec.depth_fit ? '' : '⚠ ';      // spec: no depth fit is visible on the badge
+  return `${warn}${f(rec.width_ft)} × ${f(rec.height_ft)} × ${f(rec.depth_ft)} ${u}`;
 }
 function updateBadge() {
   if (!calibrateBtn) return;
-  calibrateBtn.textContent = formatBadge(state.calibration);
-  calibrateBtn.classList.toggle('is-calibrated', !!state.calibration);
-  calibrateBtn.title = state.calibration
-    ? 'Stage calibration (click to edit)'
-    : 'Calibrate the stage so lights are placed in real-world units';
+  const rec = state.calibration;
+  calibrateBtn.textContent = formatBadge(rec);
+  calibrateBtn.classList.toggle('is-calibrated', !!rec);
+  calibrateBtn.classList.toggle('is-no-fit', !!rec && !rec.depth_fit);
+  calibrateBtn.title = !rec
+    ? 'Calibrate the stage so lights are placed in real-world units'
+    : rec.depth_fit ? 'Stage calibration (click to edit)' : NO_FIT_TITLE;
 }
 function applyUnits(u) {
   state.units = u === 'm' ? 'm' : 'ft';

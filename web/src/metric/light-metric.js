@@ -4,6 +4,7 @@
 // handles and the 3D fallback keep using position/direction/target.
 import {
   solveCamera, worldToEngine, engineToWorld, engineDirToWorld, worldDirToEngine, falloffToMetric,
+  effectiveFit,
 } from './calibration.js';
 
 const EPS = 1e-9;
@@ -14,10 +15,10 @@ export function solveRecord(record, aspect) {
   return { ...record, camera: solveCamera(record, aspect) };
 }
 
-function fitOf(record) { return record.depth_fit || null; }
-
+// A record with no depth fit still maps depth linearly (spec §Error
+// handling), so every light gets feet fields and an engine proxy.
 export function syncLightFromFeet(L, record) {
-  const cam = record.camera, fit = fitOf(record);
+  const cam = record.camera, fit = effectiveFit(record);
   if (L.target_ft) {
     const d = [0, 1, 2].map((i) => L.target_ft[i] - L.position_ft[i]);
     L.direction_ft = Math.hypot(...d) > EPS ? norm(d) : engineDirToWorld(L.direction);
@@ -26,9 +27,9 @@ export function syncLightFromFeet(L, record) {
   }
   L.direction_eng = worldDirToEngine(L.direction_ft);
   L.falloff_ft = falloffToMetric(L.falloff ?? 1, record);
-  L.position_eng = fit ? worldToEngine(L.position_ft, cam, fit) : null;
+  L.position_eng = worldToEngine(L.position_ft, cam, fit);
   if (L.position_eng) L.position = L.position_eng.slice();
-  if (L.target_ft && fit) {
+  if (L.target_ft) {
     const t = worldToEngine(L.target_ft, cam, fit);
     if (t) L.target = t;
   }
@@ -37,8 +38,7 @@ export function syncLightFromFeet(L, record) {
 }
 
 export function syncLightFromEngine(L, record) {
-  const cam = record.camera, fit = fitOf(record);
-  if (!fit) return L;
+  const cam = record.camera, fit = effectiveFit(record);
   L.position_ft = engineToWorld(L.position, cam, fit);
   if (Array.isArray(L.target)) L.target_ft = engineToWorld(L.target, cam, fit);
   else delete L.target_ft;
