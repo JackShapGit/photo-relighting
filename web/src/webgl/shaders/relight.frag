@@ -239,7 +239,8 @@ void main() {
     float gobo = 1.0;
     if (u_l_hasGobo[i] == 1) {
       vec2 uv;
-      if (u_l_type[i] == 0) uv = ortho_uv(P, u_l_direction[i]);          // engine-space
+      if (u_l_type[i] == 0)                                                // engine-space P and direction
+        uv = ortho_uv(P, (u_metric == 1) ? u_l_direction_eng[i] : u_l_direction[i]);
       else if (u_l_type[i] == 2)
         uv = perspective_uv(Pw, u_l_position[i], u_l_direction[i], u_l_cone_angle[i]);
       else uv = equirect_uv(Pw, u_l_position[i]);

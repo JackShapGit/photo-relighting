@@ -346,11 +346,15 @@ def render(
 
         if L.gobo is not None and L.gobo.texture_id in gobo_textures:
             if metric:
-                # Perspective/equirect project from the feet-space light onto
-                # feet-space P; ortho keeps engine-space P (relight.frag passes
-                # P with u_l_direction, i.e. the lighting-space direction).
-                L_gobo = dataclasses.replace(L, position=tuple(pos_ft), direction=tuple(dir_ft), target=None)
-                uv = project_uv(P if L.type == "directional" else Pw, L_gobo)
+                if L.type == "directional":
+                    # Ortho projection stays fully engine-space: engine P with the
+                    # engine direction (relight.frag: ortho_uv(P, u_l_direction_eng)).
+                    uv = project_uv(P, L_eng)
+                else:
+                    # Perspective/equirect project from the feet-space light onto
+                    # feet-space P.
+                    L_gobo = dataclasses.replace(L, position=tuple(pos_ft), direction=tuple(dir_ft), target=None)
+                    uv = project_uv(Pw, L_gobo)
             else:
                 uv = project_uv(P, L)
             # rotation, scale, offset around (0.5, 0.5)
