@@ -93,12 +93,16 @@ export async function init(canvas) {
     u_r_enabled:       gl.getUniformLocation(program, 'u_r_enabled'),
     u_r_affects:       gl.getUniformLocation(program, 'u_r_affects'),
   };
+  // metric mode (calibrated scenes): camera + depth fit
+  for (const name of ['u_metric', 'u_cam', 'u_cam2', 'u_fit']) locs[name] = gl.getUniformLocation(program, name);
 }
 
 function buildLightUniformLocs() {
   const fields = ['type', 'position', 'direction', 'color', 'intensity',
                   'falloff', 'cone_angle', 'softness', 'affects', 'enabled', 'hasGobo',
-                  'goboScale', 'goboRotation', 'goboOffset', 'goboInvert'];
+                  'goboScale', 'goboRotation', 'goboOffset', 'goboInvert',
+                  // metric mode: engine-space proxies for shadow marching
+                  'position_eng', 'direction_eng', 'shadowDir'];
   const out = {};
   for (const f of fields) out[f] = gl.getUniformLocation(program, `u_l_${f}`);
   return out;
@@ -201,12 +205,28 @@ export function draw(state) {
   gl.uniform1f(locs.u_ambient_background, aBg);
   gl.uniform1i(locs.u_debugView, encodeDebugView(state.debugView));
 
+  // Metric mode: cal.camera is the solved CameraModel stored on the record
+  // (Task 8's solveRecord); the renderer never solves. Without it the shader
+  // runs the engine-space path unchanged.
+  const cal = state.calibration;
+  if (cal && cal.camera) {
+    const c = cal.camera;
+    gl.uniform1i(locs.u_metric, 1);
+    gl.uniform4f(locs.u_cam, c.f, c.dist_ft, c.height_ft, c.u_c);
+    gl.uniform4f(locs.u_cam2, c.va_h, c.k_y, c.aspect, cal.depth_ft);
+    const fit = cal.depth_fit;
+    gl.uniform3f(locs.u_fit, fit ? fit.a : 0, fit ? fit.b : 0, fit ? 1 : 0);
+  } else {
+    gl.uniform1i(locs.u_metric, 0);
+  }
+
   const allLights = state.lights || [];
   const reflectors = allLights.filter((L) => L.type === 'reflector');
   const emitters   = allLights.filter((L) => L.type !== 'reflector');
   const reflEmission = computeReflectorEmission(allLights);
 
   state.gelResolved = emitters.map(L => ({ ...L, color: resolveColor(L) }));
+  emitters.metricMode = !!(cal && cal.camera);
   uploadLights(emitters, state.gelResolved || emitters);
   uploadReflectors(reflectors, reflEmission);
 
@@ -226,11 +246,22 @@ function uploadLights(lights, lightsResolved) {
   const intensity = new Float32Array(8), falloff = new Float32Array(8);
   const cone = new Float32Array(8), soft = new Float32Array(8);
   const affects = new Int32Array(8), enabled = new Int32Array(8), hasGobo = new Int32Array(8);
+  // Metric mode: lighting-space arrays carry feet (position_ft/direction_ft,
+  // set by the sync helper); engine-space proxies drive shadow marching.
+  const posEng = new Float32Array(8 * 3), dirEng = new Float32Array(8 * 3);
+  const shadowDir = new Int32Array(8);
+  const metric = !!(lights.metricMode);
   for (let i = 0; i < N; i++) {
     const L = lights[i], R = lightsResolved[i] ?? L;
     types[i] = { directional: 0, point: 1, spotlight: 2 }[L.type];
-    pos.set(L.position, i * 3); dir.set(L.direction, i * 3); col.set(R.color, i * 3);
-    intensity[i] = L.intensity; falloff[i] = L.falloff;
+    const posSrc = metric && L.position_ft ? L.position_ft : L.position;
+    const dirSrc = metric && L.direction_ft ? L.direction_ft : L.direction;
+    pos.set(posSrc, i * 3); dir.set(dirSrc, i * 3); col.set(R.color, i * 3);
+    posEng.set(L.position_eng || L.position, i * 3);
+    dirEng.set(L.direction_eng || L.direction, i * 3);
+    shadowDir[i] = metric && !L.position_eng ? 1 : 0;
+    intensity[i] = L.intensity;
+    falloff[i] = metric && L.falloff_ft != null ? L.falloff_ft : L.falloff;
     cone[i] = L.cone_angle; soft[i] = L.softness;
     affects[i] = { all: 0, subject: 1, background: 2 }[L.affects];
     enabled[i] = L.enabled ? 1 : 0;
@@ -247,6 +278,9 @@ function uploadLights(lights, lightsResolved) {
   gl.uniform1iv(locs.affects, affects);
   gl.uniform1iv(locs.enabled, enabled);
   gl.uniform1iv(locs.hasGobo, hasGobo);
+  gl.uniform3fv(locs.position_eng, posEng);
+  gl.uniform3fv(locs.direction_eng, dirEng);
+  gl.uniform1iv(locs.shadowDir, shadowDir);
 
   // Gobo transform arrays
   const goboScale = new Float32Array(8);

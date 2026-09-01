@@ -29,6 +29,29 @@ uniform vec3 u_l_color[MAX_LIGHTS];
 uniform float u_l_intensity[MAX_LIGHTS];
 uniform float u_l_falloff[MAX_LIGHTS];
 uniform float u_l_cone_angle[MAX_LIGHTS];
+
+// ── Metric mode (calibrated scenes) ──────────────────────────────────────
+uniform int   u_metric;                 // 1 = positions in feet
+uniform vec4  u_cam;                    // f, dist_ft, height_ft, u_c
+uniform vec4  u_cam2;                   // va_h, k_y, aspect, depth_ft
+uniform vec3  u_fit;                    // a, b, hasFit(0/1)
+uniform vec3  u_l_position_eng[MAX_LIGHTS];   // engine-space proxy for shadow marching
+uniform vec3  u_l_direction_eng[MAX_LIGHTS];
+uniform int   u_l_shadowDir[MAX_LIGHTS];      // 1 = march along direction (light has no projection)
+
+float metric_zcam(float d) {
+  if (u_fit.z < 0.5) return u_cam.y + d * u_cam2.w;     // no depth fit: linear over stage depth
+  float inv = max(u_fit.x * d + u_fit.y, 1.0 / 10000.0);
+  return clamp(1.0 / inv, 0.5, 10000.0);
+}
+
+vec3 metric_pixel_to_world(vec2 uv, float d) {
+  float zc = metric_zcam(d);
+  float X = (uv.x - u_cam.w) * zc / u_cam.x;
+  float Y = u_cam2.y * (u_cam.z - (uv.y * u_cam2.z - u_cam2.x) * zc / u_cam.x);
+  return vec3(X, Y, zc - u_cam.y);
+}
+
 uniform float u_l_softness[MAX_LIGHTS];
 uniform int  u_l_affects[MAX_LIGHTS];
 uniform int  u_l_enabled[MAX_LIGHTS];
@@ -164,7 +187,13 @@ void main() {
   if (u_debugView == 2) { fragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
   if (u_debugView == 3) { fragColor = vec4(vec3(maskV), 1.0); return; }
 
-  vec3 P = vec3(v_uv.x, v_uv.y, depth);
+  vec3 P = vec3(v_uv.x, v_uv.y, depth);            // engine space (shadows, gobo ortho)
+  vec3 Pw = P;                                      // lighting-space position
+  vec3 Nw = N;                                      // lighting-space normal
+  if (u_metric == 1) {
+    Pw = metric_pixel_to_world(v_uv, depth);
+    Nw = vec3(N.x, -N.y, -N.z);
+  }
 
   // Confidence weights only the per-light contributions (not ambient), so
   // low-confidence regions still get ambient illumination from the original.
@@ -179,14 +208,23 @@ void main() {
     if (u_l_enabled[i] == 0) continue;
 
     vec3 Lvec; float atten;
+    vec3 Lvec_eng;                                   // engine-space vector for shadow marching
     if (u_l_type[i] == 0) {  // directional
       Lvec = normalize(-u_l_direction[i]);
       atten = 1.0;
+      Lvec_eng = (u_metric == 1) ? normalize(-u_l_direction_eng[i]) : Lvec;
     } else {
-      vec3 d = u_l_position[i] - P;
+      vec3 d = u_l_position[i] - Pw;
       float dist = length(d) + 1e-6;
       Lvec = d / dist;
       atten = 1.0 / (1.0 + u_l_falloff[i] * dist * dist);
+      if (u_metric == 1) {
+        Lvec_eng = (u_l_shadowDir[i] == 1)
+          ? normalize(-u_l_direction_eng[i])
+          : normalize(u_l_position_eng[i] - P);
+      } else {
+        Lvec_eng = Lvec;
+      }
     }
 
     float cone = 1.0;
@@ -201,10 +239,10 @@ void main() {
     float gobo = 1.0;
     if (u_l_hasGobo[i] == 1) {
       vec2 uv;
-      if (u_l_type[i] == 0) uv = ortho_uv(P, u_l_direction[i]);
+      if (u_l_type[i] == 0) uv = ortho_uv(P, u_l_direction[i]);          // engine-space
       else if (u_l_type[i] == 2)
-        uv = perspective_uv(P, u_l_position[i], u_l_direction[i], u_l_cone_angle[i]);
-      else uv = equirect_uv(P, u_l_position[i]);
+        uv = perspective_uv(Pw, u_l_position[i], u_l_direction[i], u_l_cone_angle[i]);
+      else uv = equirect_uv(Pw, u_l_position[i]);
       vec2 c = uv - 0.5;
       float cs = cos(u_l_goboRotation[i]), sn = sin(u_l_goboRotation[i]);
       vec2 r = vec2(cs * c.x - sn * c.y, sn * c.x + cs * c.y);
@@ -213,12 +251,12 @@ void main() {
       if (u_l_goboInvert[i] == 1) gobo = 1.0 - gobo;
     }
 
-    float diff = max(dot(N, Lvec), 0.0);
+    float diff = max(dot(Nw, Lvec), 0.0);
     float maskW = u_l_affects[i] == 0 ? 1.0
                 : u_l_affects[i] == 1 ? maskV
                 : (1.0 - maskV);
 
-    float shadow = shadow_factor(P, Lvec, maskV);
+    float shadow = shadow_factor(P, Lvec_eng, maskV);
     total += original * u_l_color[i] * u_l_intensity[i] * diff * atten * cone * gobo * maskW * confV * shadow;
   }
 
