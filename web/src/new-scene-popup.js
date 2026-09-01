@@ -15,7 +15,7 @@ export function openNewScenePopup({ canCancel, title = 'New Scene' } = {}) {
         </label>
         <label class="modal-row">
           <span>Image</span>
-          <input id="ns-file" type="file" accept="image/*" />
+          <input id="ns-file" type="file" title="JPEG, PNG, TIFF, HEIC, WEBP or camera raw (DNG, CR2/CR3, NEF, ARW, RAF, ORF, RW2)" />
         </label>
         <label class="modal-row">
           <span>Mode</span>
