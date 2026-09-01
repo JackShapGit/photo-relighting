@@ -977,6 +977,36 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
   outline-offset: 2px;
 }
 
+/* ─── Edge arrows (calibrated lights outside the photo) ─────────────────── */
+/* Positioned by handles.js at 2% inside the nearest photo edge; the glyph is
+ * rotated toward the light and the name label sits on the photo-centre side. */
+.edge-arrow {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+  color: var(--accent, #4a7);
+  line-height: 1;
+  z-index: 3;
+}
+.edge-arrow__glyph {
+  display: block;
+  font-size: 18px;
+  text-shadow: 0 0 3px #000, 0 0 1px #000;
+}
+.edge-arrow__label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  font-size: 11px;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 0 3px #000, 0 0 2px #000;
+  pointer-events: none;
+}
+.edge-arrow.is-selected { color: #fff; }
+.edge-arrow.is-selected .edge-arrow__glyph { filter: drop-shadow(0 0 4px var(--accent, #4a7)); }
+
 /* ─── Units toggle + calibrate badge (header) ───────────────────────────── */
 /* #unit-toggle reuses .view-mode. The Calibrate button doubles as the badge
  * once a calibration is applied ("40 × 20 × 30 ft"). */
