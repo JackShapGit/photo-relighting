@@ -15,6 +15,7 @@ if _PKG_ROOT not in _re.__path__:
 
 from relighting_engine import RelightingEngine
 from relighting_engine.core.io import read_image, write_image
+from relighting_engine.metric.calibration import Calibration
 from relighting_engine.tests.golden.configs import FIXTURES, configs
 
 ROOT = Path(__file__).resolve().parent.parent / "packages" / "relighting_engine" / "tests" / "fixtures"
@@ -32,8 +33,10 @@ def main() -> None:
             continue
         img, _ = read_image(src)
         prepared = eng.prepare(img, mode="interactive")
-        for name, lights, ambient in configs():
-            out = eng.render(prepared, lights=lights, ambient=ambient)
+        for name, lights, ambient, cal_dict in configs():
+            calibration = (Calibration.from_dict(cal_dict, prepared.height / prepared.width)
+                           if cal_dict else None)
+            out = eng.render(prepared, lights=lights, ambient=ambient, calibration=calibration)
             outp = DST / f"{Path(fixture).stem}__{name}.png"
             write_image(outp, out, format="png", bit_depth=8)
             print(f"wrote {outp.name}")
