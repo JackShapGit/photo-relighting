@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createSceneFromFixture } from './helpers.js';
 
 const FIXTURE = path.resolve('packages/relighting_engine/tests/fixtures/images/portrait_a.jpg');
 const GOLDEN = path.resolve('packages/relighting_engine/tests/fixtures/expected/portrait_a__single_directional.png');
@@ -19,35 +20,12 @@ test.setTimeout(120_000);
 const t0 = Date.now();
 const mark = (label) => console.log(`[parity +${((Date.now() - t0) / 1000).toFixed(1)}s] ${label}`);
 
-// Create a scene from the fixture through the new-scene popup and wait for the
-// prepared dimensions. The popup opens by itself only when the server has no
-// scenes; once a previous run has created one, open it with "+ New Scene".
-// The Create button only enables once both a name and a file are set.
+// Create a scene from the fixture (shared helper: new-scene popup, wait for
+// the scene id to change) and size the viewport for a pixel-exact capture.
 async function uploadFixture(page) {
   // 2D-only view so the photo canvas gets the whole stage (the default Split
   // mode halves it and the capture would be letterboxed to ~130 px wide).
-  await page.addInitScript(() => { try { localStorage.setItem('photo-relight:view-mode', '2d'); } catch {} });
-  await page.goto('http://localhost:8765/web/playground.html');
-  const popupOpen = await page.locator('#ns-name').waitFor({ state: 'visible', timeout: 5000 })
-    .then(() => true, () => false);
-  if (!popupOpen) {
-    await page.click('#new-scene-btn');
-    await page.locator('#ns-name').waitFor({ state: 'visible', timeout: 10000 });
-  }
-  // When a previous run's scene auto-loaded, __state already has a width, so
-  // wait for the scene id to change rather than for width alone; otherwise the
-  // late applyScene would overwrite the lights this test sets.
-  const prevScene = await page.evaluate(() => window.__state?.sceneId ?? null);
-  await page.fill('#ns-name', 'parity');
-  await page.setInputFiles('#ns-file', FIXTURE);
-  await page.click('#ns-create');
-  await page.waitForFunction((prev) => {
-    const s = window.__state;
-    return !!s?.sceneId && s.sceneId !== prev && s.width > 0 && s.height > 0;
-  }, prevScene, { timeout: 60000 });
-  // applyScene sets width before its awaited renderer/texture setup; give it a
-  // moment to finish before touching lights.
-  await page.waitForTimeout(1500);
+  await createSceneFromFixture(page, { fixture: FIXTURE, name: 'parity', viewMode: '2d' });
 
   // Size the viewport so the stage is exactly imgW × imgH: measure the chrome
   // around #stage (header, tree pane, props pane, borders) instead of assuming

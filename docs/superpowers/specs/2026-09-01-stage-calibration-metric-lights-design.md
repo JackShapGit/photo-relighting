@@ -1,7 +1,7 @@
 # Stage Calibration and Metric Lights — Design Spec
 
 Date: 2026-09-01
-Status: Approved in discussion, awaiting user review of this document
+Status: Implemented 2026-09-01 (feat/stage-calibration)
 Roadmap position: Spec 1 of 6 (next: Fixture Table)
 
 ## Goal
@@ -298,6 +298,29 @@ extension, unit labels; fixture markers for lights beyond the point cloud.
 6. 3D viewport stage grid, fixture markers, camera framing.
 7. 2D edge arrows.
 8. Metric depth cross-check endpoint and warning.
+
+## Deviations (as implemented, 2026-09-01)
+
+- Reflectors stay in the engine frame in metric mode: they get no feet
+  fields, no edge arrow, and are not migrated on calibration (the spec did
+  not address them; the panel treats them as uncalibrated).
+- No depth fit: `effectiveFit(record)` supplies the linear fallback
+  (zCam = dist_ft + d·depth_ft) to every JS geometry path (light sync, drag
+  sync, placement projection, point cloud), matching the shader's
+  `u_fit.z = 0` rule; the badge shows a warning glyph and the panel its
+  inline warning. Python keeps its own no-fit path (shadow proxy null).
+- Metric depth checkpoint location: `RELIGHT_METRIC_CKPT`, else
+  `~/.cache/relighting/depth_anything_v2_metric_hypersim_vitb.pth`; never
+  downloaded. `run_metric` lives in `depth/metric_check.py` with a lazy
+  `depth_anything_v2` import (the shipped depth adapter is DA3 via the
+  HuggingFace hub and has no model directory to share).
+- Ortho gobo projection uses the engine-space light direction in metric mode
+  (both shader and Python), keeping the gobo UV in the same space as the
+  engine-space shadow proxy.
+- WebGL/Python parity is asserted in-test: the Playwright parity spec uses
+  `toMatchSnapshot` against the Python goldens under
+  `tests/fixtures/expected` (maxDiffPixelRatio 0.02, threshold 0.1) via
+  `snapshotPathTemplate`, instead of the standalone parity_check script.
 
 ## Roadmap (agreed 2026-09-01)
 
