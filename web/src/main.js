@@ -12,7 +12,7 @@ import {
 import {
   prepare, listGobos, render as serverRender, renderLayers,
   listScenes, getScene, createScene, updateScene, renameScene,
-  refineMask, getCapabilities, currentWorkspace,
+  refineMask, getCapabilities, currentWorkspace, checkCalibration,
 } from './api.js';
 import {
   invalidatePolish,
@@ -853,12 +853,29 @@ window.__state = state;  // for console debugging
 // ─── Stage calibration ────────────────────────────────────────────────────
 // Install (or remove, with null) a calibration record: solve the camera for
 // this image, give every light feet coordinates, notify listeners, redraw+save.
+let lastAppliedRecord = null;   // the panel's record object behind state.calibration
 function applyCalibration(record) {
+  lastAppliedRecord = record || null;
   state.calibration = record ? solveRecord(record, state.height / state.width) : null;
   if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
   else for (const L of state.lights) clearMetric(L);
   document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
   redrawAndSave();
+}
+
+// Server-side metric-depth cross-check of a just-applied record. Persists
+// depth_check on the live calibration when the model disagrees by more than
+// 20% (and the record is still the applied one); returns the server's answer
+// for the panel's warning. Missing model, offline, timeout: all silent.
+async function crossCheckCalibration(record) {
+  if (!state.sceneId) return null;
+  const res = await checkCalibration(state.sceneId, record);
+  if (res?.available && res.median_error_pct > 20
+      && state.calibration && record === lastAppliedRecord) {
+    state.calibration.depth_check = { median_error_pct: res.median_error_pct, warned: true };
+    scheduleSave();
+  }
+  return res;
 }
 // Hooks for the parity spec and console use.
 window.__applyCalibration = () => applyCalibration(state.calibration);
@@ -926,7 +943,7 @@ const calibPanel = mountCalibrationPanel({
   sampleDepth: (u, v) => depthSampler?.sample(u, v) ?? NaN,
   onApply: applyCalibration,
   onClear: () => applyCalibration(null),
-  onCrossCheck: null,   // Task 13: server-side depth cross-check hook
+  onCrossCheck: crossCheckCalibration,
 });
 calibrateBtn?.addEventListener('click', () => {
   if (!state.sessionId) return;

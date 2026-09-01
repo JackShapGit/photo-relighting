@@ -21,8 +21,10 @@ from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from relighting_api.scene_store import DEFAULT_WORKSPACE
+from relighting_api.schemas import CalibrationModel
 
 router = APIRouter(prefix="/scenes")
 
@@ -139,6 +141,38 @@ async def delete_scene(scene_id: str, request: Request) -> dict[str, bool]:
     if not request.app.state.scenes.delete(scene_id, workspace_id=_workspace(request)):
         raise HTTPException(status_code=404, detail="scene not found")
     return {"ok": True}
+
+
+# ─── Calibration cross-check ────────────────────────────────────────────────
+
+class CalibrationCheckRequest(BaseModel):
+    calibration: CalibrationModel
+
+
+@router.post("/{scene_id}/calibration/check")
+async def check_calibration(
+    scene_id: str, req: CalibrationCheckRequest, request: Request,
+) -> dict[str, Any]:
+    """Optional metric-depth cross-check of a stage calibration.
+
+    Answers ``{available: false, median_error_pct: null}`` whenever the metric
+    checkpoint is not installed (the default), without touching the scene.
+    """
+    from relighting_engine.depth import metric_check
+    if not metric_check.available():
+        return {"available": False, "median_error_pct": None}
+    scene = request.app.state.scenes.get(scene_id, workspace_id=_workspace(request))
+    if scene is None:
+        raise HTTPException(status_code=404, detail="scene not found")
+    prepared = request.app.state.sessions.get(scene["session_id"])
+    if prepared is None:
+        raise HTTPException(status_code=409, detail="image session missing")
+    cal = req.calibration.to_engine(prepared.height / prepared.width)
+    result = await run_in_threadpool(metric_check.compare, prepared, cal, req.calibration.marks)
+    return {
+        "available": result is not None,
+        "median_error_pct": result["median_error_pct"] if result else None,
+    }
 
 
 # ─── Export / Import ────────────────────────────────────────────────────────

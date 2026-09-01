@@ -141,6 +141,22 @@ export async function importScene(file) {
   return r.json();
 }
 
+// ─── Calibration cross-check ─────────────────────────────────────────────
+
+// Optional metric-depth cross-check of a stage calibration record. The server
+// answers { available: false, median_error_pct: null } when the metric model
+// is not installed; callers treat every failure as "no opinion".
+export async function checkCalibration(sceneId, calibration) {
+  const r = await fetch(wsUrl(`/scenes/${sceneId}/calibration/check`), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ calibration }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!r.ok) throw new Error(`/scenes calibration/check: ${r.status}`);
+  return r.json();
+}
+
 // ─── Polish API ──────────────────────────────────────────────────────────
 
 export async function getCapabilities() {

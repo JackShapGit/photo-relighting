@@ -9,6 +9,9 @@ import { toDisplay, fromDisplay } from './units.js';
 
 const SHORT = { lipL: 'lip L', lipR: 'lip R', top: 'top', backL: 'back L', backR: 'back R' };
 const DONE_PROMPT = 'All five marks set. Adjust by dragging, then Apply.';
+const CROSS_CHECK_WARN_PCT = 20;
+const crossCheckMessage = (pct) =>
+  `Metric depth model disagrees with your marks by ${Math.round(pct)}%; recheck the lip and back-line marks.`;
 
 const isTextField = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
 
@@ -21,7 +24,11 @@ const isTextField = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEX
  * @param {(u:number,v:number)=>number} o.sampleDepth  depth at a photo coordinate (NaN if unknown)
  * @param {(record:object)=>void} o.onApply
  * @param {()=>void} o.onClear
- * @param {(record:object)=>void} [o.onCrossCheck]  reserved for the Task 13 server cross-check; no-op today
+ * @param {(record:object)=>Promise<{available:boolean, median_error_pct:number|null}|null>} [o.onCrossCheck]
+ *   optional server-side metric-depth cross-check, fired after onApply. The
+ *   caller owns the record (persisting depth_check); the panel only shows the
+ *   warning when the model is available and disagrees by more than 20%.
+ *   Every failure (offline, timeout, model missing) is silent.
  */
 export function mountCalibrationPanel({
   panelEl, overlayEl, canvasWrapEl, getState, sampleDepth, onApply, onClear, onCrossCheck = null,
@@ -77,12 +84,29 @@ export function mountCalibrationPanel({
   });
 
   // ── messages ──
+  let warnings = [];
   function showErrors(list) {
     errorsEl.innerHTML = list.map((m) => `<li>${escapeHtml(m)}</li>`).join('');
   }
   function showWarnings(list) {
-    warnEl.hidden = list.length === 0;
-    warnEl.innerHTML = list.map((m) => `<div>${escapeHtml(m)}</div>`).join('');
+    warnings = list.slice();
+    warnEl.hidden = warnings.length === 0;
+    warnEl.innerHTML = warnings.map((m) => `<div>${escapeHtml(m)}</div>`).join('');
+  }
+  function addWarning(msg) { showWarnings([...warnings, msg]); }
+
+  // ── metric cross-check (async, silent on every failure) ──
+  let checkSeq = 0;
+  function crossCheck(rec) {
+    if (typeof onCrossCheck !== 'function') return;
+    const seq = ++checkSeq;
+    let p;
+    try { p = Promise.resolve(onCrossCheck(rec)); } catch { return; }
+    p.then((res) => {
+      if (seq !== checkSeq) return;          // a newer Apply or Clear superseded this check
+      if (!res || !res.available || !(res.median_error_pct > CROSS_CHECK_WARN_PCT)) return;
+      addWarning(crossCheckMessage(res.median_error_pct));
+    }).catch(() => {});
   }
   function updatePrompt() {
     if (!markingActive) { promptEl.hidden = true; return; }
@@ -195,7 +219,10 @@ export function mountCalibrationPanel({
     const fill = (el, ft) => { el.value = ft != null ? toDisplay(ft, units).toFixed(1) : ''; };
     fill(wIn, rec?.width_ft); fill(hIn, rec?.height_ft); fill(dIn, rec?.depth_ft);
     marking = createMarking(rec?.marks || {});
-    showErrors([]); showWarnings([]);
+    showErrors([]);
+    // A persisted cross-check warning stays visible on reopen until re-Apply.
+    const dc = rec?.depth_check;
+    showWarnings(dc?.warned && dc.median_error_pct > CROSS_CHECK_WARN_PCT ? [crossCheckMessage(dc.median_error_pct)] : []);
     panelEl.hidden = false;
     // Existing marks are shown right away so they can be adjusted.
     if (Object.keys(marking.marks).length) startMarking(); else exitMarking();
@@ -234,9 +261,10 @@ export function mountCalibrationPanel({
     showWarnings(warns);
     exitMarking();
     onApply(rec);
-    if (typeof onCrossCheck === 'function') onCrossCheck(rec);   // Task 13 hook (no-op today)
+    crossCheck(rec);
   }
   function clear() {
+    checkSeq++;                      // drop any in-flight cross-check result
     marking = createMarking({});
     renderMarkers();
     showErrors([]); showWarnings([]);
