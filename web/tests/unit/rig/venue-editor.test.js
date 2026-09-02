@@ -17,6 +17,8 @@ const form = (over = {}) => ({
   name: 'Capri', width: '40', height: '20', depth: '30', rows: '3', cols: '3', focus: '5',
   number_from_stage_left: false, positions: V.positions, ...over,
 });
+const HOUSE = { left_wall_ft: -30, right_wall_ft: 30, floor_drop_ft: 3, ceiling_ft: 30, depth_ft: 60, estimated: true };
+const houseForm = (over = {}) => ({ left: '-30', right: '30', floor_drop: '3', ceiling: '30', depth: '60', ...over });
 
 test('venueFromForm parses feet, keeps the id/positions, and reports no errors', () => {
   const { venue, errors } = venueFromForm(form(), 'ft', V);
@@ -52,4 +54,28 @@ test('venueFromForm reports errors for a blank name, non-positive or garbage dim
   const e3 = venueFromForm(form({ focus: '-1' }), 'ft', V).errors;
   assert.ok(e3.some((m) => /focus/i.test(m)));
   assert.equal(venueFromForm(form({ focus: '0' }), 'ft', V).errors.length, 0, 'a zero focus height is allowed');
+});
+
+test('venueFromForm: untouched house fields keep the base house (still estimated); default_height_ref passes through', () => {
+  const { venue, errors } = venueFromForm(form({ house: houseForm(), house_edited: false, default_height_ref: 'ceiling' }), 'ft', { ...V, house: HOUSE });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(venue.house, HOUSE);
+  assert.equal(venue.default_height_ref, 'ceiling');
+  assert.equal(venueFromForm(form(), 'ft', V).venue.default_height_ref, 'deck', 'default when absent');
+  assert.equal(venueFromForm(form(), 'ft', V).venue.house, undefined, 'no house on the base and none typed: none written');
+});
+
+test('venueFromForm parses edited house fields in the current unit and clamps them; edits clear estimated', () => {
+  const { venue, errors } = venueFromForm(form({ house: houseForm({ ceiling: '34', floor_drop: '-2', left: '-28' }), house_edited: true }), 'ft', { ...V, house: HOUSE });
+  assert.deepEqual(errors, []);
+  assert.equal(venue.house.ceiling_ft, 34);
+  assert.equal(venue.house.floor_drop_ft, 0, 'floor cannot be above the deck');
+  assert.equal(venue.house.left_wall_ft, -28);
+  assert.equal(venue.house.estimated, false);
+  const low = venueFromForm(form({ house: houseForm({ ceiling: '15' }), house_edited: true }), 'ft', { ...V, house: HOUSE }).venue.house;
+  assert.ok(low.ceiling_ft > 20, 'ceiling clamped above the opening');
+  const m = venueFromForm(form({ width: '12.2', height: '6.1', depth: '9.1', house: houseForm({ left: '-9', right: '9', floor_drop: '1', ceiling: '9', depth: '18' }), house_edited: true }), 'm', { ...V, house: HOUSE }).venue.house;
+  near(m.left_wall_ft, -9 / 0.3048); near(m.ceiling_ft, 9 / 0.3048); near(m.depth_ft, 18 / 0.3048);
+  const bad = venueFromForm(form({ house: houseForm({ ceiling: 'high' }), house_edited: true }), 'ft', { ...V, house: HOUSE }).errors;
+  assert.ok(bad.some((e) => /ceiling/i.test(e)));
 });

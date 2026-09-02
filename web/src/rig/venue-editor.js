@@ -6,6 +6,15 @@
 // venueFromForm) run under node --test.
 import { renderPositionsTable } from './rig-tab.js';
 import { toDisplay, parseLength } from '../metric/units.js';
+import { clampHouse } from '../metric/cube-geometry.js';
+import { defaultHouse } from './geometry.js';
+import { HEIGHT_REFS } from './height-ref.js';
+
+const HOUSE_FIELDS = [
+  ['left', 'Left wall', 'left_wall_ft'], ['right', 'Right wall', 'right_wall_ft'], ['floor_drop', 'Floor drop', 'floor_drop_ft'],
+  ['ceiling', 'Ceiling', 'ceiling_ft'], ['depth', 'House depth', 'depth_ft'],
+];
+const REF_LABELS = { deck: 'Deck', house_floor: 'House floor', ceiling: 'Ceiling' };
 
 const GRID_MIN = 1, GRID_MAX = 6;
 
@@ -51,6 +60,23 @@ export function venueFromForm(values, units = 'ft', base = {}) {
     focus_height_ft,
     positions: values.positions || base.positions || [],
   };
+  // House (calibration cube): untouched fields keep the base house as is
+  // (still `estimated`); edited fields are parsed in the unit and clamped.
+  let house = base.house || null;
+  if (values.house && values.house_edited) {
+    const patch = {};
+    for (const [key, label, field] of HOUSE_FIELDS) {
+      const ft = parseLength(String(values.house[key] ?? ''), units);
+      if (ft == null) errors.push(`${label} must be a length`); else patch[field] = ft;
+    }
+    if (Number.isFinite(width_ft) && Number.isFinite(height_ft) && Number.isFinite(depth_ft)) {
+      const dims = { width_ft, height_ft, depth_ft };
+      house = clampHouse(house || defaultHouse(dims), dims, patch);
+    }
+  }
+  if (house) venue.house = house;
+  venue.default_height_ref = HEIGHT_REFS.includes(values.default_height_ref)
+    ? values.default_height_ref : (base.default_height_ref || 'deck');
   return { venue, errors };
 }
 
@@ -73,6 +99,8 @@ export function openVenueEditor({ venue, units = 'ft', onSave, onDuplicate, onDe
     const u = units === 'm' ? 'm' : 'ft';
     const f = (ft) => (Number.isFinite(ft) ? toDisplay(ft, u).toFixed(1) : '');
     let positions = (venue.positions || []).map((p) => ({ ...p }));   // local draft; Save commits
+    const house0 = venue.house || defaultHouse(venue);
+    let houseEdited = false;
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -95,6 +123,14 @@ export function openVenueEditor({ venue, units = 'ft', onSave, onDuplicate, onDe
           <label>Focus height (${u}) <input id="ve-focus" type="text" inputmode="decimal" value="${f(venue.focus_height_ft ?? 5)}" /></label>
         </div>
         <label class="checkbox-row"><input id="ve-from-sl" type="checkbox" ${venue.grid?.number_from_stage_left ? 'checked' : ''} /> Number areas from stage left</label>
+        <h3 class="rig-heading">House</h3>
+        <div class="venue-dims">
+          ${HOUSE_FIELDS.map(([key, label, field]) => `<label>${label} (${u}) <input id="ve-h-${key}" class="ve-house" type="text" inputmode="decimal" value="${f(house0[field])}" /></label>`).join('')}
+        </div>
+        <p class="venue-note" id="ve-house-note" ${house0.estimated ? '' : 'hidden'}>House values are estimated from the stage; edit any of them to confirm.</p>
+        <div class="venue-dims">
+          <label>Default height reference <select id="ve-href">${HEIGHT_REFS.map((r) => `<option value="${r}" ${(venue.default_height_ref || 'deck') === r ? 'selected' : ''}>${REF_LABELS[r]}</option>`).join('')}</select></label>
+        </div>
         <h3 class="rig-heading">Positions</h3>
         <div id="ve-positions" class="rig-table-wrap"></div>
         <div id="ve-dup" class="venue-dup" hidden>
@@ -131,7 +167,7 @@ export function openVenueEditor({ venue, units = 'ft', onSave, onDuplicate, onDe
     }
 
     function drawPositions() {
-      renderPositionsTable($('#ve-positions'), { ...venue, positions }, (next) => {
+      renderPositionsTable($('#ve-positions'), { ...venue, house: house0, positions }, (next) => {
         positions = next.positions;
         drawPositions();
       }, { units: u });
@@ -139,11 +175,16 @@ export function openVenueEditor({ venue, units = 'ft', onSave, onDuplicate, onDe
     drawPositions();
 
     function readForm() {
+      const houseValues = Object.fromEntries(HOUSE_FIELDS.map(([key]) => [key, $(`#ve-h-${key}`).value]));
       return venueFromForm({
         name: $('#ve-name').value, width: $('#ve-width').value, height: $('#ve-height').value, depth: $('#ve-depth').value,
         rows: $('#ve-rows').value, cols: $('#ve-cols').value, focus: $('#ve-focus').value,
         number_from_stage_left: $('#ve-from-sl').checked, positions,
-      }, u, venue);
+        house: houseValues, house_edited: houseEdited, default_height_ref: $('#ve-href').value,
+      }, u, { ...venue, house: house0 });
+    }
+    for (const input of overlay.querySelectorAll('.ve-house')) {
+      input.addEventListener('input', () => { houseEdited = true; $('#ve-house-note').hidden = true; });
     }
 
     $('#ve-close').addEventListener('click', () => close(null));

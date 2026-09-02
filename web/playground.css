@@ -229,6 +229,7 @@ main {
 .rig-table input.rig-text { width: 72px; }
 .rig-table input[type="number"] { width: 52px; }
 .rig-table select { max-width: 110px; }
+.rig-table select.rig-ref { max-width: 92px; }
 .rig-table input:hover, .rig-table select:hover { border-color: var(--input-border, #444); }
 .rig-table input:focus, .rig-table select:focus { border-color: var(--accent, #4a7); outline: none; background: var(--bg); }
 .rig-table input.is-invalid { border-color: var(--danger, #c44); }

@@ -16,7 +16,8 @@ import {
   refineMask, getCapabilities, currentWorkspace, checkCalibration,
   listVenues, createVenue, getVenue, updateVenue, duplicateVenue, deleteVenue,
 } from './api.js';
-import { mergeVenueIntoCalibration } from './rig/geometry.js';
+import { mergeVenueIntoCalibration, defaultHouse } from './rig/geometry.js';
+import { recomputePositionsForHouse, recomputeBoomFixturesForHouse } from './rig/height-ref.js';
 import { rigMode, buildRigTree } from './rig/tree-mirror.js';
 import { syncRig, syncAllFixtures, detachFixture, detachAim } from './rig/fixture-sync.js';
 import { applyFixturePreset } from './rig/presets.js';
@@ -116,6 +117,22 @@ function venueFromCalibration(name, cal) {
   };
 }
 
+// A venue record as the client uses it: the house envelope is always present
+// (calibration cube; the API fills defaults on read, older snapshots may not).
+function withHouse(v) {
+  return v && !v.house ? { ...v, house: defaultHouse(v) } : v;
+}
+
+// Before a venue is written: heights stated against the house floor or
+// ceiling are re-derived (pipe trims on the positions, fixture heights on
+// booms) so they stay where the user stated them when the house changed.
+function prepareVenueForSave(venue) {
+  const house = venue.house || defaultHouse(venue);
+  const positions = recomputePositionsForHouse(venue.positions, house);
+  recomputeBoomFixturesForHouse(state.lights, positions, house);
+  return { ...venue, house, positions };
+}
+
 // Resolve the scene's venue on load. Migration: a calibrated scene with no
 // venue gets one named after itself (dimensions from the calibration, starter
 // positions) and is saved. Returns true when the scene needs saving.
@@ -129,7 +146,7 @@ async function loadSceneVenue(scene, s) {
   let dirty = false;
   if (cal?.width_ft && !state.venue_id) {
     try {
-      const v = await createVenue(venueFromCalibration(scene.name, cal));
+      const v = withHouse(await createVenue(venueFromCalibration(scene.name, cal)));
       state.venue_id = v.id; state.venue = v; state.venue_snapshot = v;
       state.venueMigrated = true;
       dirty = true;
@@ -139,14 +156,15 @@ async function loadSceneVenue(scene, s) {
   }
   if (state.venue_id && !state.venue) {
     try {
-      state.venue = await getVenue(state.venue_id);
+      state.venue = withHouse(await getVenue(state.venue_id));
       if (JSON.stringify(state.venue) !== JSON.stringify(state.venue_snapshot)) {
         state.venue_snapshot = state.venue;
         dirty = true;
       }
     } catch (e) {
       // 404 (deleted) or unreachable: run from the embedded snapshot.
-      state.venue = state.venue_snapshot;
+      state.venue = withHouse(state.venue_snapshot);
+      state.venue_snapshot = state.venue;
       state.venueMissing = true;
       console.warn('venue unavailable; using the scene snapshot', e);
     }
@@ -161,13 +179,13 @@ async function syncVenueWithCalibration(record) {
   if (!record || !state.sceneId) return;
   try {
     if (!state.venue_id) {
-      const v = await createVenue(venueFromCalibration(state.sceneName, record));
+      const v = withHouse(await createVenue(venueFromCalibration(state.sceneName, record)));
       state.venue_id = v.id; state.venue = v; state.venue_snapshot = v; state.venueMissing = false;
     } else if (state.venue && !state.venueMissing
         && ['width_ft', 'height_ft', 'depth_ft'].some((k) => state.venue[k] !== record[k])) {
-      const v = await updateVenue(state.venue_id, {
+      const v = withHouse(await updateVenue(state.venue_id, prepareVenueForSave({
         ...state.venue, width_ft: record.width_ft, height_ft: record.height_ft, depth_ft: record.depth_ft,
-      });
+      })));
       state.venue = v; state.venue_snapshot = v;
     } else {
       return;
@@ -712,6 +730,7 @@ rigTab = mountRigTab({
 // mirrored into the calibration (re-solved against this image; marks are
 // unchanged), every light re-derived, tree/rig/props/3D refreshed, saved.
 function adoptVenue(v, { missing = false } = {}) {
+  v = withHouse(v);
   state.venue = v;
   state.venue_snapshot = v;
   state.venueMissing = missing;
@@ -742,7 +761,7 @@ async function openVenueEditorForScene() {
     venue: state.venue,
     units: state.units,
     onSave: async (venue) => {
-      const v = await updateVenue(state.venue_id, venue);
+      const v = await updateVenue(state.venue_id, prepareVenueForSave(venue));
       adoptVenue(v);
     },
     onDuplicate: async (name) => {
@@ -789,6 +808,7 @@ window.__rig = { buildFixtureLight, nextOffset };   // console / spec hook (pure
 // A rig-tab edit to the venue (positions): the live venue and its snapshot
 // change at once so fixtures re-hang immediately; the server copy follows.
 async function applyVenueEdit(venue) {
+  venue = prepareVenueForSave(venue);
   state.venue = venue;
   state.venue_snapshot = venue;
   syncAllFixtures(state.lights, state.venue, state.calibration);

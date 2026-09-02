@@ -68,10 +68,31 @@ def starter_positions(width_ft: float, height_ft: float, depth_ft: float) -> lis
     ]
 
 
+def default_house(width_ft: float, height_ft: float, depth_ft: float) -> dict[str, Any]:
+    """Mirror of web/src/rig/geometry.js defaultHouse (same numbers)."""
+    return {
+        "left_wall_ft": -0.75 * width_ft,
+        "right_wall_ft": 0.75 * width_ft,
+        "floor_drop_ft": 3.0,
+        "ceiling_ft": height_ft + 10.0,
+        "depth_ft": 2.0 * depth_ft,
+        "estimated": True,
+    }
+
+
 def _row_to_venue(row: sqlite3.Row) -> dict[str, Any]:
     out = json.loads(row["venue_json"])
     for k in _ROW_KEYS:
         out[k] = row[k]
+    # Calibration-cube fields, filled on read only (a client persists them on
+    # its next save): the house envelope, the default height reference, and
+    # each position's height reference.
+    if not out.get("house"):
+        out["house"] = default_house(out["width_ft"], out["height_ft"], out["depth_ft"])
+    out.setdefault("default_height_ref", "deck")
+    for p in out.get("positions", []):
+        p.setdefault("height_ref", "deck")
+        p.setdefault("height_input_ft", None)
     return out
 
 

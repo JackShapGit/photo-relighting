@@ -18,6 +18,13 @@ import {
 import { syncLightFromFeet } from '../metric/light-metric.js';
 import { toDisplay, parseLength } from '../metric/units.js';
 import { MAX_EMITTERS } from '../webgl/renderer.js';
+import { defaultHouse } from './geometry.js';
+import {
+  HEIGHT_REFS, fromDeck, describeHeight, positionWithHeightRef, positionWithHeightInput, fixtureWithHeightInput,
+} from './height-ref.js';
+
+const REF_LABELS = { deck: 'Deck', house_floor: 'House floor', ceiling: 'Ceiling' };
+const REF_OPTIONS = HEIGHT_REFS.map((r) => ({ value: r, label: REF_LABELS[r] }));
 
 export const CUSTOM_ROW_ID = 'custom';
 export { CAP_MESSAGE };
@@ -284,6 +291,7 @@ export function renderPositionsTable(container, venue, onChange, opts = {}) {
   const units = opts.units || 'ft';
   const counts = opts.fixtureCounts || new Map();
   const positions = venue?.positions || [];
+  const house = venue?.house || defaultHouse(venue || { width_ft: 40, height_ft: 20, depth_ft: 30 });
   container.innerHTML = '';
 
   const update = (idx, patch) => {
@@ -298,7 +306,7 @@ export function renderPositionsTable(container, venue, onChange, opts = {}) {
   const table = el('table', 'rig-table rig-positions');
   const thead = el('thead');
   const hr = el('tr');
-  for (const h of ['Position', 'Kind', 'Number 1', 'Number 2', 'Fixtures', '']) hr.appendChild(el('th', null, h));
+  for (const h of ['Position', 'Kind', 'Number 1', 'Number 2', 'Ref', 'Fixtures', '']) hr.appendChild(el('th', null, h));
   thead.appendChild(hr);
   table.appendChild(thead);
   const tbody = el('tbody');
@@ -317,7 +325,19 @@ export function renderPositionsTable(container, venue, onChange, opts = {}) {
     });
     n1.title = labels.n1;
     tr.appendChild(cell(n1));
-    if (fields.n2) {
+    const ref = p.height_ref || 'deck';
+    if (fields.n2 === 'trim_ft') {
+      // A pipe's height as the user states it (deck / house floor / ceiling);
+      // trim_ft stays deck-relative underneath.
+      const shown = ref === 'deck' ? p.trim_ft : (Number.isFinite(p.height_input_ft) ? p.height_input_ft : fromDeck(p.trim_ft, ref, house));
+      const n2 = lengthInput(shown, units, `pos:${p.id}:trim_ft`, (v) => {
+        const next = positionWithHeightInput(p, v, house);
+        if (!validPositionValue('trim_ft', next.trim_ft, venue)) return false;
+        replace(idx, next); return true;
+      });
+      n2.title = `${ref === 'deck' ? labels.n2 : `${REF_LABELS[ref]} (${units})`} · ${describeHeight(p.trim_ft, house, units)}`;
+      tr.appendChild(cell(n2));
+    } else if (fields.n2) {
       const n2 = lengthInput(p[fields.n2], units, `pos:${p.id}:${fields.n2}`, (ft) => {
         if (!validPositionValue(fields.n2, ft, venue)) return false;
         update(idx, { [fields.n2]: ft }); return true;
@@ -326,6 +346,14 @@ export function renderPositionsTable(container, venue, onChange, opts = {}) {
       tr.appendChild(cell(n2));
     } else {
       tr.appendChild(cell('—', 'rig-muted'));
+    }
+    if (p.kind === 'floor') {
+      tr.appendChild(cell('—', 'rig-muted'));
+    } else {
+      const refSel = select(REF_OPTIONS, ref, `pos:${p.id}:ref`, (r) => replace(idx, positionWithHeightRef(p, r, house)));
+      refSel.className = 'rig-select rig-ref';
+      refSel.title = p.kind === 'boom' ? 'How fixture heights on this boom are stated' : 'How this pipe\'s trim is stated';
+      tr.appendChild(cell(refSel));
     }
     tr.appendChild(cell(String(counts.get(p.id) || 0), 'rig-count'));
     const actions = el('span', 'rig-actions');
@@ -495,12 +523,26 @@ export function mountRigTab({ rootEl, getState, onVenueChange, onLightsChange, o
         tr.appendChild(cell(select(positionOptions, f.position_id || '', `fix:${L.id}:position`, (pid) => {
           setFixturePosition(L, pid || null, venue, record); commit();
         })));
-        if (pos) {
+        if (pos && pos.kind === 'boom') {
+          // Height on the boom, stated in the boom's reference; offset_ft stays deck-relative.
+          const house = venue.house || defaultHouse(venue);
+          const bref = pos.height_ref || 'deck';
+          const shown = bref === 'deck' ? f.offset_ft : (Number.isFinite(f.height_input_ft) ? f.height_input_ft : fromDeck(f.offset_ft, bref, house));
+          const off = lengthInput(shown, units, `fix:${L.id}:offset`, (v) => {
+            const probe = { fixture: { ...f } };
+            fixtureWithHeightInput(probe, v, pos, house);
+            if (!validOffset(pos, probe.fixture.offset_ft, venue)) return false;
+            fixtureWithHeightInput(L, v, pos, house);
+            setFixtureOffset(L, L.fixture.offset_ft, venue, record); commit(); return true;
+          });
+          off.title = `${bref === 'deck' ? 'Height' : REF_LABELS[bref]} (${units}) · ${describeHeight(f.offset_ft, house, units)}`;
+          tr.appendChild(cell(off));
+        } else if (pos) {
           const off = lengthInput(f.offset_ft, units, `fix:${L.id}:offset`, (ft) => {
             if (!validOffset(pos, ft, venue)) return false;
             setFixtureOffset(L, ft, venue, record); commit(); return true;
           });
-          off.title = pos.kind === 'boom' ? `Height (${units})` : `Offset (${units})`;
+          off.title = `Offset (${units})`;
           tr.appendChild(cell(off));
         } else {
           const xyz = L.position_ft ? L.position_ft.map((v) => fmt(v, units)).join(' / ') : '—';

@@ -145,3 +145,59 @@ def test_validation_errors_are_422(client: TestClient, bad) -> None:
 
 def test_invalid_workspace_name_is_400(client: TestClient) -> None:
     assert client.get("/venues?workspace=bad%20name").status_code == 400
+
+
+# ─── House dimensions and height references (calibration cube) ──────────────
+
+def test_venue_without_house_reads_back_with_estimated_defaults(client: TestClient) -> None:
+    v = client.post("/venues", json=_venue()).json()
+    got = client.get(f"/venues/{v['id']}").json()
+    assert got["house"] == {
+        "left_wall_ft": -30.0, "right_wall_ft": 30.0, "floor_drop_ft": 3.0,
+        "ceiling_ft": 30.0, "depth_ft": 60.0, "estimated": True,
+    }
+    assert got["default_height_ref"] == "deck"
+    assert client.get("/venues").json()[0]["house"]["estimated"] is True
+    # Defaults are filled on read only: the stored blob still lacks them until a client saves.
+    raw = client.app.state.venues._conn  # noqa: SLF001 — store internals, read-only check
+    with raw() as c:
+        blob = json.loads(c.execute("SELECT venue_json FROM venues WHERE id = ?", (v["id"],)).fetchone()["venue_json"])
+    assert blob.get("house") is None, "defaults are filled on read, not written back"
+
+
+def test_house_floor_above_deck_is_422(client: TestClient) -> None:
+    v = client.post("/venues", json=_venue()).json()
+    bad = _venue(house={"left_wall_ft": -30, "right_wall_ft": 30, "floor_drop_ft": -1, "ceiling_ft": 30, "depth_ft": 60})
+    assert client.put(f"/venues/{v['id']}", json=bad).status_code == 422
+
+
+@pytest.mark.parametrize("house", [
+    {"left_wall_ft": -30, "right_wall_ft": 30, "floor_drop_ft": 3, "ceiling_ft": 20, "depth_ft": 60},   # ceiling == opening
+    {"left_wall_ft": -30, "right_wall_ft": 30, "floor_drop_ft": 3, "ceiling_ft": 12, "depth_ft": 60},   # below the opening
+    {"left_wall_ft": 30, "right_wall_ft": -30, "floor_drop_ft": 3, "ceiling_ft": 30, "depth_ft": 60},   # walls crossed
+    {"left_wall_ft": -10, "right_wall_ft": 10, "floor_drop_ft": 3, "ceiling_ft": 30, "depth_ft": 60},   # narrower than the stage
+    {"left_wall_ft": -30, "right_wall_ft": 30, "floor_drop_ft": 3, "ceiling_ft": 30, "depth_ft": 0},    # no depth
+])
+def test_house_ceiling_and_wall_rules_are_422(client: TestClient, house) -> None:
+    v = client.post("/venues", json=_venue()).json()
+    assert client.put(f"/venues/{v['id']}", json=_venue(house=house)).status_code == 422
+    good = {"left_wall_ft": -30, "right_wall_ft": 30, "floor_drop_ft": 3, "ceiling_ft": 30, "depth_ft": 60, "estimated": False}
+    r = client.put(f"/venues/{v['id']}", json=_venue(house=good, default_height_ref="ceiling"))
+    assert r.status_code == 200, r.text
+    got = client.get(f"/venues/{v['id']}").json()
+    assert got["house"] == good and got["default_height_ref"] == "ceiling"
+
+
+def test_position_height_reference_round_trips(client: TestClient) -> None:
+    pos = [{"id": "p1", "name": "1E", "kind": "pipe", "upstage_ft": 6, "trim_ft": 26,
+            "height_ref": "ceiling", "height_input_ft": 4},
+           {"id": "p2", "name": "Boom SL", "kind": "boom", "upstage_ft": 8, "offset_ft": 22, "height_ref": "house_floor"}]
+    v = client.post("/venues", json=_venue(positions=pos)).json()
+    got = client.get(f"/venues/{v['id']}").json()["positions"]
+    assert got[0]["height_ref"] == "ceiling" and got[0]["height_input_ft"] == 4 and got[0]["trim_ft"] == 26
+    assert got[1]["height_ref"] == "house_floor" and got[1]["height_input_ft"] is None
+    # Default reference for a position that does not state one.
+    plain = client.post("/venues", json=_venue()).json()["positions"][0]
+    assert plain["height_ref"] == "deck" and plain["height_input_ft"] is None
+    bad = _venue(positions=[{**pos[0], "height_ref": "roof"}])
+    assert client.post("/venues", content=json.dumps(bad), headers={"content-type": "application/json"}).status_code == 422

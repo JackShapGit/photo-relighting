@@ -76,15 +76,36 @@ class GridModel(BaseModel):
     number_from_stage_left: bool = False
 
 
+HeightRef = Literal["deck", "house_floor", "ceiling"]
+
+
+class HouseModel(BaseModel):
+    """The room around the proscenium (calibration cube spec): wall X
+    positions, how far the house floor sits below the deck, the ceiling
+    height above the deck, and the house depth toward the camera. `estimated`
+    stays true until a user edits any value."""
+    left_wall_ft: Finite
+    right_wall_ft: Finite
+    floor_drop_ft: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
+    ceiling_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    depth_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    estimated: bool = False
+
+
 class PositionModel(BaseModel):
     """A hanging position in the Spec 1 world frame (feet). Pipes need a trim
-    height, booms an X offset, floor positions only an upstage distance."""
+    height, booms an X offset, floor positions only an upstage distance.
+    `trim_ft` stays deck-relative; `height_ref`/`height_input_ft` record how
+    the user stated the height (above the deck, above the house floor, or as
+    a drop below the ceiling)."""
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     kind: Literal["pipe", "boom", "floor"]
     upstage_ft: Finite
     trim_ft: Finite | None = None
     offset_ft: Finite | None = None
+    height_ref: HeightRef = "deck"
+    height_input_ft: Finite | None = None
 
     @model_validator(mode="after")
     def _validate_kind(self) -> "PositionModel":
@@ -103,6 +124,21 @@ class VenueModel(BaseModel):
     grid: GridModel = Field(default_factory=GridModel)
     focus_height_ft: Annotated[float, Field(ge=0.0, allow_inf_nan=False)] = 5.0
     positions: list[PositionModel] = Field(default_factory=list)
+    house: HouseModel | None = None
+    default_height_ref: HeightRef = "deck"
+
+    @model_validator(mode="after")
+    def _validate_house(self) -> "VenueModel":
+        h = self.house
+        if h is None:
+            return self
+        if h.left_wall_ft >= h.right_wall_ft:
+            raise ValueError("house left wall must be left of the right wall")
+        if h.right_wall_ft - h.left_wall_ft < self.width_ft:
+            raise ValueError("house must be at least as wide as the stage")
+        if h.ceiling_ft <= self.height_ft:
+            raise ValueError("house ceiling must be above the opening height")
+        return self
 
 
 class GoboModel(BaseModel):

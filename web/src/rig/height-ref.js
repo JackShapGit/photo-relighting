@@ -38,6 +38,50 @@ export function recomputePositionsForHouse(positions, house) {
   });
 }
 
+/**
+ * Re-derive the deck heights of fixtures hung on booms whose position is
+ * stated against the house floor or ceiling, from each fixture's kept
+ * `height_input_ft`. Mutates the lights' fixture blocks; returns the count.
+ */
+export function recomputeBoomFixturesForHouse(lights, positions, house) {
+  const byId = new Map((positions || []).map((p) => [p.id, p]));
+  let n = 0;
+  for (const L of lights || []) {
+    const f = L?.fixture;
+    if (!f?.position_id || !Number.isFinite(f.height_input_ft)) continue;
+    const p = byId.get(f.position_id);
+    if (!p || p.kind !== 'boom' || (p.height_ref || 'deck') === 'deck') continue;
+    f.offset_ft = toDeck(f.height_input_ft, p.height_ref, house);
+    n += 1;
+  }
+  return n;
+}
+
+/** Switch a position's reference; the shown number converts so the physical height does not move. */
+export function positionWithHeightRef(position, ref, house) {
+  const next = { ...position, height_ref: ref };
+  if (position.kind === 'pipe' && Number.isFinite(position.trim_ft)) {
+    next.height_input_ft = fromDeck(position.trim_ft, ref, house);
+  }
+  return next;
+}
+
+/** A typed height in the position's reference → stored deck trim (pipes) plus the stated number. */
+export function positionWithHeightInput(position, value, house) {
+  const ref = position.height_ref || 'deck';
+  const next = { ...position, height_input_ft: value };
+  if (position.kind === 'pipe') next.trim_ft = toDeck(value, ref, house);
+  return next;
+}
+
+/** A typed height for a fixture on a boom, in the boom's reference (mutates the fixture block). */
+export function fixtureWithHeightInput(L, value, position, house) {
+  const ref = position?.height_ref || 'deck';
+  L.fixture.offset_ft = toDeck(value, ref, house);
+  if (ref === 'deck') delete L.fixture.height_input_ft; else L.fixture.height_input_ft = value;
+  return L;
+}
+
 /** Both derived readings of a deck height: "12.0 ft above house floor · 4.0 ft below ceiling". */
 export function describeHeight(deckValue, house, units = 'ft') {
   const above = fromDeck(deckValue, 'house_floor', house);
