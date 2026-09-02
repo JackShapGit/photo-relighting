@@ -163,6 +163,9 @@ If `https://relight.<yourdomain>` does not work, walk this ladder:
   typical; edge cases with very large output resolution could approach
   the limit and return HTTP 524.
 - Cloudflare outage takes the demo down. Rare, no remediation.
+- Venues (Spec 2 rigs: stage dimensions and hang positions) live in the same
+  SQLite DB as scenes (`RELIGHT_SCENES_DB`, default `cache/scenes.db`), so
+  back up or relocate scenes and venues together.
 
 ## Running the Playwright suite next to a dev server
 
@@ -174,7 +177,9 @@ scenes and prepared sessions in that server's **real** `cache/scenes.db` and
 `cache/sessions/`, and the run is invalid as evidence because it did not
 exercise a fresh server. Run the suite only when nothing is listening on 8765
 (`netstat -ano | findstr :8765` must be empty), and stop any dev server on
-that port first; the demo server on 8001 is unaffected.
+that port first; the demo server on 8001 is unaffected. Playwright's own
+server runs with `web/tests/` as its working directory, so its scenes, venues
+and sessions land in the gitignored `web/tests/cache/`, never in `cache/`.
 
 ## Uninstall
 

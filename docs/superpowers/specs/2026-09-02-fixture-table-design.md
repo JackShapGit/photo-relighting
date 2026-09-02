@@ -1,7 +1,7 @@
 # Fixture Table — Design Spec
 
 Date: 2026-09-02
-Status: Approved in discussion (grilled), awaiting user review of this document
+Status: Implemented 2026-09-02 (feat/fixture-table)
 Roadmap position: Spec 2 of 6 (previous: Stage Calibration and Metric Lights; next: Readouts and Measuring)
 
 ## Goal
@@ -305,6 +305,45 @@ its X onto the pipe, or Y onto the boom).
 8. Venue editor + badge.
 9. Grid overlays (3D cells and position bars; 2D areas toggle).
 10. Smoke/E2E, docs, spec status.
+
+## Deviations (as implemented, 2026-09-02)
+
+- **Linear light planar shadows (Python):** the planar-shadow proxy for a bar
+  is a point light at the bar's midpoint; the heightfield path matches the
+  shader per pixel. Cyc units rarely cast planar shadows; the parity golden
+  runs with shadows off.
+- **`twelve_lights` golden:** the 12-light grid is mirrored into the house
+  (6/14/22 ft in front of the lip, trim 20, aimed 20 ft upstage) because the
+  portrait fixture's normals face the camera and straight-down units graze.
+- **Single-pass upload:** the renderer's single-pass path uploads only the
+  enabled emitters (pixel-identical; a scene with 8 enabled + 1 disabled light
+  no longer drops a live light).
+- **"Add fixture" copies the selected row** when a fixture row is selected
+  (each add selects the new light, so repeated clicks build a run on one
+  position), else the last row of the table.
+- **`cellCorners` lives in `web/src/rig/areas.js`** (re-exported from
+  `3d/rig-overlay.js`): `three` is loaded from the import map, so a module
+  that imports it cannot run under `node --test`.
+- **Venue Save reloads the point cloud:** re-solving the calibration goes
+  through `relight:calibration`, which rebuilds the 3D scene; a stage-only
+  refresh is a later optimisation.
+- **Rig tab default width is 580 px** (not 520) so both tables fit without a
+  horizontal scroll; the Lights tab keeps 260.
+- **`handles.js` resize listener:** each remount now replaces the previous
+  window `resize` listener (stale closures threw once the light count grew).
+- **"Calibration…" button in the venue editor:** in rig mode the badge and
+  the Rig tab's "Venue…" both open the editor, so the editor carries the way
+  back to the marking panel.
+- **Duplicate remaps fixture position ids by index:** the API gives a
+  duplicated venue fresh position ids; fixtures hung on the old venue follow
+  to the copy by position order.
+- **Parity harness:** the calibrated parity specs pin the Rig pane to the
+  Lights width (the Rig tab opens by itself once calibrated) and put their
+  test lights in the tree (calibration migrates a venue, which regenerates
+  the tree and re-flattens `state.lights`).
+- **Playwright runs one worker:** every spec pays a real `/prepare` on the one
+  local GPU; with the default worker count the cold runs overlap and the
+  scene-creation waits time out.
 
 ## Roadmap (unchanged)
 

@@ -25,6 +25,13 @@ const mark = (label) => console.log(`[parity +${((Date.now() - t0) / 1000).toFix
 // Create a scene from the fixture (shared helper: new-scene popup, wait for
 // the scene id to change) and size the viewport for a pixel-exact capture.
 async function uploadFixture(page) {
+  // The Rig tab opens by itself once a scene is calibrated (Spec 2) and its
+  // pane defaults to 580 px, which would shrink the stage after the viewport
+  // has been sized below; pin the Rig pane to the Lights width so the canvas
+  // stays imgW × imgH through the calibrated tests.
+  await page.addInitScript(() => {
+    try { localStorage.setItem('photo-relight:left-pane-width:rig', '260'); } catch {}
+  });
   // 2D-only view so the photo canvas gets the whole stage (the default Split
   // mode halves it and the capture would be letterboxed to ~130 px wide).
   await createSceneFromFixture(page, { fixture: FIXTURE, name: 'parity', viewMode: '2d' });
@@ -124,6 +131,9 @@ test('WebGL calibrated render matches Python golden within tolerance', async ({ 
       position_ft: [0, 20, -60], target_ft: [0, 5, 10], intensity: 6.0, falloff: 1.0,
       cone_angle: 0.6, softness: 0.1, color: [1,1,1], color_temperature: null, gel_preset: null,
       gobo: null, affects: 'all', enabled: true }];
+    // Spec 2: calibrating migrates a venue and the tree is regenerated from it,
+    // which re-flattens state.lights — so the test lights must live in the tree.
+    s.tree = s.lights.map((l, i) => Object.assign(l, { kind: 'light', id: `parity-${i}`, name: `parity ${i}` }));
     window.__syncMetricLights();
     s.ambient = 0.1;
     window.__redraw();
@@ -152,6 +162,9 @@ test('WebGL linear (cyc) render matches Python golden within tolerance', async (
       endpoint_a_ft: [-15, 20, 26], endpoint_b_ft: [15, 20, 26],
       intensity: 7.0, falloff: 1.0, cone_angle: 0.5, softness: 0.6, color: [1,1,1], color_temperature: null,
       gel_preset: null, gobo: null, affects: 'all', enabled: true }];
+    // Spec 2: calibrating migrates a venue and the tree is regenerated from it,
+    // which re-flattens state.lights — so the test lights must live in the tree.
+    s.tree = s.lights.map((l, i) => Object.assign(l, { kind: 'light', id: `parity-${i}`, name: `parity ${i}` }));
     window.__syncMetricLights();
     s.ambient = 0.1;
     window.__redraw();
@@ -185,6 +198,9 @@ test('WebGL multi-pass (12 lights) render matches Python golden within tolerance
         color: [1,1,1], color_temperature: null, gel_preset: null, gobo: null, affects: 'all', enabled: true });
     }
     s.lights = lights;
+    // Spec 2: calibrating migrates a venue and the tree is regenerated from it,
+    // which re-flattens state.lights — so the test lights must live in the tree.
+    s.tree = s.lights.map((l, i) => Object.assign(l, { kind: 'light', id: `parity-${i}`, name: `parity ${i}` }));
     window.__syncMetricLights();
     s.ambient = 0.1;
     window.__redraw();
