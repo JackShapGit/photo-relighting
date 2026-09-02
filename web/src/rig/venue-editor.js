@@ -92,7 +92,7 @@ function escapeHtml(s) {
  * @param {Function} opts.onSave         async (venue) => void
  * @param {Function} [opts.onDuplicate]  async (name) => void
  * @param {Function} [opts.onDelete]     async ({ force }) => void — a 409 rejection (err.status, err.body.scene_count) asks to force
- * @param {Function} [opts.onCalibrate]  () => void — closes the editor and opens the photo calibration panel (marks)
+ * @param {Function} [opts.onCalibrate]  () => void — closes the editor and opens the photo calibration panel (stage box)
  */
 export function openVenueEditor({ venue, units = 'ft', onSave, onDuplicate, onDelete, onCalibrate } = {}) {
   return new Promise((resolve) => {
@@ -143,7 +143,7 @@ export function openVenueEditor({ venue, units = 'ft', onSave, onDuplicate, onDe
         <div class="modal-actions">
           ${onDelete ? '<button id="ve-delete" type="button" class="venue-danger">Delete</button>' : ''}
           ${onDuplicate ? '<button id="ve-duplicate" type="button">Duplicate…</button>' : ''}
-          ${onCalibrate ? '<button id="ve-calibrate" type="button" title="Re-mark the photo (the dimensions stay with the venue)">Calibration…</button>' : ''}
+          ${onCalibrate ? '<button id="ve-calibrate" type="button" title="Fit the stage box on the photo (the dimensions stay with the venue)">Calibration…</button>' : ''}
           <span class="modal-spacer"></span>
           <button id="ve-close" type="button">Close</button>
           <button id="ve-save" type="button" class="venue-primary">Save</button>

@@ -6,7 +6,8 @@ import { createSceneFromFixture, PORTRAIT_A } from './helpers.js';
 // box in its default pose; dragging the lip-right handle with the mouse
 // changes the draft and the preview camera and marks the draft dirty; Apply
 // commits it; Undo returns to no calibration and the default pose; Redo
-// calibrates again; the Stage box toggle hides and shows the box.
+// calibrates again; the Stage box toggle hides and shows the box. Then the
+// house box: a real ceiling drag, Apply with a ceiling-referenced pipe, toggle.
 test.setTimeout(180_000);
 
 test('stage box: default pose, real drag, apply, undo, redo, toggle', async ({ page }) => {
@@ -22,7 +23,7 @@ test('stage box: default pose, real drag, apply, undo, redo, toggle', async ({ p
   // Default pose: the box is visible with its five handles.
   const overlay = page.locator('#cube-overlay');
   await expect(overlay).toBeVisible();
-  await expect(overlay.locator('.cube-handle')).toHaveCount(5);
+  await expect(overlay.locator('.cube-stage .cube-handle')).toHaveCount(5);
   const before = await page.evaluate(() => {
     const d = window.__calDraft();
     return { lipR: d.draft.marks.lipR.slice(), dist: window.__calPreview().dist_ft, dirty: d.dirty };
@@ -90,7 +91,67 @@ test('stage box: default pose, real drag, apply, undo, redo, toggle', async ({ p
   await expect(overlay.locator('.cube-stage')).toBeHidden();
   await stageToggle.click();
   await expect(overlay.locator('.cube-stage')).toBeVisible();
-  await expect(overlay.locator('.cube-handle')).toHaveCount(5);
+  await expect(overlay.locator('.cube-stage .cube-handle')).toHaveCount(5);
+
+  // ── House box (Task 4): real ceiling drag, Apply with a ceiling-referenced pipe, toggle ──
+  const houseToggle = page.locator('#show-house-box');
+  await expect(houseToggle).toBeChecked();
+  const houseG = overlay.locator('.cube-house');
+  await expect(houseG).toBeVisible();
+  const ceilHandle = houseG.locator('.cube-house-handle[data-edge="ceiling"]');
+  await expect(ceilHandle).toBeVisible();
+  const readHouse = () => page.evaluate(() => {
+    const d = window.__calDraft();
+    return {
+      ceiling: d.draft.house.ceiling_ft, estimated: d.draft.house.estimated, dirty: d.dirty,
+      label: document.querySelector('#cube-overlay .cube-house .cube-label[data-field="ceiling_ft"]').textContent,
+    };
+  });
+  const hBefore = await readHouse();
+  const cb = await ceilHandle.boundingBox();
+  const ccx = cb.x + cb.width / 2, ccy = cb.y + cb.height / 2;
+  await page.mouse.move(ccx, ccy);
+  await page.mouse.down();
+  for (let i = 1; i <= 4; i++) await page.mouse.move(ccx, ccy - i * 10, { steps: 2 });
+  await page.mouse.up();
+  const hAfter = await readHouse();
+  expect(hAfter.ceiling).toBeGreaterThan(hBefore.ceiling + 0.5);
+  expect(hAfter.estimated).toBe(false);
+  expect(hAfter.dirty).toBe(true);
+  expect(hAfter.label).not.toBe(hBefore.label);
+
+  // A pipe stated against the ceiling keeps its drop when the house is applied.
+  await page.evaluate(() => {
+    const p = window.__state.venue.positions.find((q) => q.kind === 'pipe');
+    p.height_ref = 'ceiling'; p.height_input_ft = 4;
+  });
+  // The scene is calibrated with a venue now, so the badge opens the venue
+  // editor; its Calibration button opens the panel.
+  await page.click('#calibrate-btn');
+  await page.click('#ve-calibrate');
+  await expect(page.locator('#calib-panel')).toBeVisible();
+  await page.click('#calib-panel .cal-apply');
+  await expect.poll(() => page.evaluate(() => window.__state.venue?.house?.estimated ?? null), { timeout: 15000 }).toBe(false);
+  const persisted = await page.evaluate(async () => {
+    const s = window.__state;
+    const v = await (await fetch(`/venues/${s.venue_id}?workspace=default`)).json();
+    const p = v.positions.find((q) => q.kind === 'pipe');
+    return { ceiling: v.house.ceiling_ft, estimated: v.house.estimated, trim: p.trim_ft, ref: p.height_ref, input: p.height_input_ft, live: s.venue.house.ceiling_ft, dirty: window.__calDraft().dirty };
+  });
+  expect(persisted.ceiling).toBeCloseTo(hAfter.ceiling, 3);
+  expect(persisted.live).toBeCloseTo(hAfter.ceiling, 3);
+  expect(persisted.estimated).toBe(false);
+  expect(persisted.ref).toBe('ceiling');
+  expect(persisted.input).toBe(4);
+  expect(persisted.trim).toBeCloseTo(hAfter.ceiling - 4, 3);
+  expect(persisted.dirty).toBe(false);
+
+  // House toggle (panel closed): off hides the house group, on shows it.
+  await page.click('#calib-panel .cal-close');
+  await houseToggle.click();
+  await expect(houseG).toBeHidden();
+  await houseToggle.click();
+  await expect(houseG).toBeVisible();
 
   expect(errors, errors.join('\n')).toEqual([]);
 });

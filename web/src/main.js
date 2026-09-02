@@ -48,7 +48,9 @@ import { toDisplay, parseLength } from './metric/units.js';
 import { mountCalibrationPanel } from './metric/calibration-panel.js';
 import { mountCubeOverlay } from './metric/cube-overlay-2d.js';
 import { createDraftState, reduce as reduceDraft, serializeUndo, hydrateUndo } from './metric/calibration-draft.js';
-import { guessCamera, marksFromCamera, clampStageDrag, applyHandleDrag, clampHouse } from './metric/cube-geometry.js';
+import {
+  guessCamera, marksFromCamera, clampStageDrag, applyHandleDrag, clampHouse, houseForDims, houseDragPatch, houseWidthPatch,
+} from './metric/cube-geometry.js';
 import { solveCamera, validateMarks } from './metric/calibration.js';
 import { mountPlacement2D } from './placement-pane-2d.js';
 
@@ -1374,7 +1376,12 @@ function resetCalibrationDraft(undoEntry = null) {
 }
 
 function dispatchDraft(action) {
-  state.cal_draft = normalizeDraft(reduceDraft(state.cal_draft, action));
+  let S = normalizeDraft(reduceDraft(state.cal_draft, action));
+  // An estimated house was derived from the stage dims: it follows them until edited.
+  if (action.type === 'edit' && action.patch?.dims && S.draft?.house?.estimated) {
+    S = { ...S, draft: { ...S.draft, house: houseForDims(S.draft.house, S.draft.dims) } };
+  }
+  state.cal_draft = S;
   state.calibration_undo = serializeUndo(state.cal_draft);
   refreshCalibrationUI();
 }
@@ -1444,9 +1451,30 @@ for (const [kind, el, key] of BOX_TOGGLES) {
 }
 
 // ── overlay edits → draft ──
-function onCubeDrag(kind, key, uv) {
-  if (kind !== 'stage') return false;          // house handles: Task 4
+// Stage handles write marks (clamped so the solve always validates); house
+// handles write feet through the preview camera (clamped to the house rules).
+// Both return whether the drag was clamped so the handle can flash.
+let houseDragOrigin = null;   // { key, startUv, house } for the house drag in progress
+function onCubeDrag(kind, key, uv, startUv = null) {
   const d = state.cal_draft?.draft;
+  if (kind === 'house') {
+    const cam = previewCamera();
+    if (!d?.house || !d.dims || !cam) return false;
+    // A house edge moves by the pointer's travel since the press (not to the
+    // pointer), so the handle parked at the image edge for an off-image wall
+    // or ceiling still nudges the real one.
+    if (!startUv) houseDragOrigin = null;
+    else if (!houseDragOrigin || houseDragOrigin.startUv !== startUv || houseDragOrigin.key !== key) {
+      houseDragOrigin = { key, startUv, house: cloneJson(d.house) };
+    }
+    const to = houseDragPatch(cam, key, uv);
+    const [field] = Object.keys(to);
+    const want = houseDragOrigin
+      ? houseDragOrigin.house[field] + (to[field] - houseDragPatch(cam, key, houseDragOrigin.startUv)[field])
+      : to[field];
+    const house = applyHousePatch({ [field]: want });
+    return !!house && Math.abs(house[field] - want) > 1e-6;
+  }
   if (!d?.marks) return false;
   const clamped = clampStageDrag(d.marks, key, uv);
   // The top handle only moves vertically, so only v counts as a clamp there.
@@ -1455,10 +1483,25 @@ function onCubeDrag(kind, key, uv) {
   return wasClamped;
 }
 function onCubeLabelEdit(kind, field, text) {
-  if (kind !== 'stage') return;                // house labels: Task 4
   const v = parseLength(text, state.units);
+  if (!Number.isFinite(v)) return;
+  if (kind === 'house') {
+    const h = state.cal_draft?.draft?.house;
+    if (!h) return;
+    if (field === 'width_ft') { if (v > 0) applyHousePatch(houseWidthPatch(h, v)); }
+    else if (field === 'ceiling_ft' || field === 'floor_drop_ft') applyHousePatch({ [field]: v });
+    return;
+  }
   if (!(v > 0)) return;
   dispatchDraft({ type: 'edit', patch: { dims: { [field]: v } } });
+}
+/** Clamp a house patch against the draft's dims and dispatch it; returns the clamped house (null when there is none). */
+function applyHousePatch(patch) {
+  const d = state.cal_draft?.draft;
+  if (!patch || !d?.house || !d.dims) return null;
+  const house = clampHouse(d.house, d.dims, patch);
+  dispatchDraft({ type: 'edit', patch: { house } });
+  return house;
 }
 
 cubeOverlay = mountCubeOverlay({
@@ -1506,14 +1549,6 @@ function restoreFixtureFields(fixtures) {
       L[k] = cloneJson(f[k]);
     }
   }
-}
-
-// A house that satisfies the venue rules for these stage dims: an estimated
-// house is re-derived from them, an edited one is clamped (walls at least a
-// stage width apart, ceiling above the opening).
-function houseForDims(house, dims) {
-  if (!house || house.estimated || !Number.isFinite(house.left_wall_ft)) return defaultHouse(dims);
-  return clampHouse(house, dims, { left_wall_ft: house.left_wall_ft });
 }
 
 // Venue write for Apply: dims from the record, house and default reference

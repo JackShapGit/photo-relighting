@@ -1219,6 +1219,19 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 #calib-panel select { max-width: 110px; }
 #calib-panel .cal-units { align-self: flex-start; }
 #calib-panel .cal-warn { color: #fc6; }
+#calib-panel .cal-house {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+#calib-panel .cal-house[hidden] { display: none !important; }
+#calib-panel .cal-house-title { font-weight: 600; color: #d6e8ff; }
+#calib-panel .cal-house-note { font-size: 11px; color: var(--text-muted); }
+#calib-panel .cal-house-msg { font-size: 11px; color: #f88; }
+@keyframes cal-reject { 0%, 100% { box-shadow: none; } 30% { box-shadow: 0 0 0 2px #f66; } }
+#calib-panel input.is-rejected { animation: cal-reject 0.6s ease-out; }
 #calib-panel .cal-dirty { color: #fc6; font-weight: 600; }
 #calib-panel .cal-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 #calib-panel button { font-size: 12px; }
@@ -1276,6 +1289,23 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
   pointer-events: all;
   cursor: text;
 }
+/* House box: the room's cross-section in a second accent, faint guide lines
+ * toward the camera, bar handles on the walls (drag X) and floor/ceiling
+ * (drag Y). A handle for an edge beyond the photo sits at the image edge,
+ * hollow, so the wall can still be grabbed. */
+#cube-overlay { --house-color: #58a6ff; }
+#cube-overlay .cube-house .cube-edge { stroke: var(--house-color); }
+#cube-overlay .cube-guide {
+  fill: none;
+  stroke: var(--house-color);
+  stroke-opacity: 0.35;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+#cube-overlay .cube-guide.is-dirty { stroke-dasharray: 4 4; }
+#cube-overlay .cube-house .cube-handle { fill: var(--house-color); }
+#cube-overlay .cube-house-handle.is-offscreen { fill: rgba(88, 166, 255, 0.25); stroke-dasharray: 2 2; }
+#cube-overlay .cube-house .cube-label { fill: #d6e8ff; }
 /* In-place edit of an edge label: an input placed over the label. */
 .cube-label-input {
   position: absolute;

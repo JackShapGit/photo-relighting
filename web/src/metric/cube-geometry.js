@@ -9,6 +9,7 @@
  * +X audience right, +Y up, +Z upstage.
  */
 import { worldToPixel, Z_CAM_MIN } from './calibration.js';
+import { defaultHouse } from '../rig/geometry.js';
 
 export const MIN_LIP_FRACTION = 0.05;    // must match calibration.js validateMarks
 const EPS = 1e-3;                        // margin that keeps a clamped drag strictly inside the rules
@@ -166,6 +167,34 @@ export function clampHouse(house, dims, patch = {}) {
   if (h.right_wall_ft - h.left_wall_ft < dims.width_ft) h.right_wall_ft = h.left_wall_ft + dims.width_ft;
   h.estimated = false;
   return h;
+}
+
+/**
+ * A house that satisfies the venue rules for these stage dims: an estimated
+ * (or malformed) house is re-derived from them, an edited one is clamped so
+ * the walls stay at least a stage width apart and the ceiling clears the
+ * opening. Used before a venue write and whenever the draft's dims change.
+ */
+export function houseForDims(house, dims) {
+  if (!house || house.estimated || !Number.isFinite(house.left_wall_ft)) return defaultHouse(dims);
+  return clampHouse(house, dims, { left_wall_ft: house.left_wall_ft });
+}
+
+/** The house patch for a handle drag on the photo: walls take X from u, floor and ceiling take Y from v. */
+export function houseDragPatch(cam, edge, [u, v]) {
+  switch (edge) {
+    case 'left': return { left_wall_ft: housePxToFt(cam, 'left', u) };
+    case 'right': return { right_wall_ft: housePxToFt(cam, 'right', u) };
+    case 'floor': return { floor_drop_ft: -housePxToFt(cam, 'floor', v) };
+    case 'ceiling': return { ceiling_ft: housePxToFt(cam, 'ceiling', v) };
+    default: throw new Error(`unknown house edge ${edge}`);
+  }
+}
+
+/** Walls for a typed house width: kept centred where they are, set the given distance apart. */
+export function houseWidthPatch(house, widthFt) {
+  const c = (house.left_wall_ft + house.right_wall_ft) / 2;
+  return { left_wall_ft: c - widthFt / 2, right_wall_ft: c + widthFt / 2 };
 }
 
 /**

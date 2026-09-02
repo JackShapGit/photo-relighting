@@ -2,20 +2,23 @@
 // projected through the draft's preview camera as an SVG under the light
 // handles — twelve edges, five draggable handles (the lip corners, the back
 // corners, and a bar on the front-top edge), and three editable edge labels
-// (width, height, depth). The SVG itself takes no pointer events; only the
-// handles and labels do, so the 2D light handles keep working. The house
-// box group is created here and filled by Task 4.
+// (width, height, depth) — plus the house box: the room's cross-section in
+// the proscenium plane (walls, floor, ceiling) with faint guide lines toward
+// the camera, four edge handles, and three editable labels. The SVG itself
+// takes no pointer events; only the handles and labels do, so the 2D light
+// handles keep working.
 //
 // The elements are created once and updated on every render, so a handle
 // keeps its pointer capture while a drag re-renders the box under it.
 import { worldToPixel } from './calibration.js';
-import { stageCorners, handlePoints } from './cube-geometry.js';
+import { stageCorners, handlePoints, houseEdgesPx } from './cube-geometry.js';
 import { formatLength, toDisplay } from './units.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const HANDLE_R = 7;                 // 14 px handles
 const CLAMP_FLASH_MS = 300;
 const TOP_BAR = { w: 26, h: 8 };
+const EDGE_MARGIN = 10;             // an off-image house edge keeps its handle this far inside the image
 const HANDLE_KEYS = ['lipL', 'lipR', 'top', 'backL', 'backR'];
 const HANDLE_TITLES = {
   lipL: 'Lip, audience left', lipR: 'Lip, audience right', top: 'Top of the opening',
@@ -33,6 +36,14 @@ const LABELS = [
   { field: 'height_ft', a: 'fbl', b: 'ftl', dx: -12, dy: 0 },
   { field: 'depth_ft', a: 'fbl', b: 'bbl', dx: -12, dy: -6 },
 ];
+// House box: the four edges of the cross-section, each with a bar handle
+// (walls drag horizontally, floor and ceiling vertically) and three labels.
+const HOUSE_EDGES = ['left', 'right', 'floor', 'ceiling'];
+const HOUSE_TITLES = { left: 'House left wall', right: 'House right wall', floor: 'House floor', ceiling: 'Ceiling' };
+const WALL_BAR = { w: 8, h: 26 };
+const FLOOR_BAR = { w: 26, h: 8 };
+const HOUSE_LABEL_FIELDS = ['width_ft', 'ceiling_ft', 'floor_drop_ft'];
+const houseLabelValue = (house, field) => (field === 'width_ft' ? house.right_wall_ft - house.left_wall_ft : house[field]);
 
 const svgEl = (tag, cls) => {
   const e = document.createElementNS(SVG_NS, tag);
@@ -47,12 +58,13 @@ const svgEl = (tag, cls) => {
  * @param {Function} o.getDraft            () => { marks, dims, house } | null
  * @param {Function} o.getPreviewCamera    () => CameraModel | null
  * @param {Function} o.getDims             () => { width_ft, height_ft, depth_ft } | null
- * @param {Function} o.getHouse            () => house | null            (Task 4)
+ * @param {Function} o.getHouse            () => house | null
  * @param {Function} o.getUnits            () => 'ft' | 'm'
  * @param {Function} o.isShown             () => { stage: boolean, house: boolean }
  * @param {Function} o.isDirty             () => boolean
- * @param {Function} o.onDrag              (kind, key, [u, v]) => boolean|void   (rAF-throttled while dragging;
- *                                          a truthy return means the drag was clamped and the handle flashes)
+ * @param {Function} o.onDrag              (kind, key, [u, v], startUv) => boolean|void   (rAF-throttled while
+ *                                          dragging; startUv is where the press landed, the same array for the
+ *                                          whole drag; a truthy return means the drag was clamped and the handle flashes)
  * @param {Function} o.onLabelEdit         (kind, field, text) => void
  */
 export function mountCubeOverlay({
@@ -65,6 +77,11 @@ export function mountCubeOverlay({
   const labelsG = svgEl('g', 'cube-labels');
   const handlesG = svgEl('g', 'cube-handles');
   stageG.append(edgesG, labelsG, handlesG);
+  const houseGuidesG = svgEl('g', 'cube-guides');
+  const houseEdgesG = svgEl('g', 'cube-edges');
+  const houseLabelsG = svgEl('g', 'cube-labels');
+  const houseHandlesG = svgEl('g', 'cube-handles');
+  houseG.append(houseGuidesG, houseEdgesG, houseLabelsG, houseHandlesG);
   overlayEl.append(houseG, stageG);
 
   const edgeEls = EDGES.map(([, , kind]) => {
@@ -75,7 +92,7 @@ export function mountCubeOverlay({
   const labelEls = LABELS.map((spec) => {
     const t = svgEl('text', 'cube-label');
     t.dataset.field = spec.field;
-    t.addEventListener('click', (e) => { e.stopPropagation(); startLabelEdit(spec.field, t); });
+    t.addEventListener('click', (e) => { e.stopPropagation(); startLabelEdit('stage', spec.field, t); });
     labelsG.appendChild(t);
     return t;
   });
@@ -86,12 +103,44 @@ export function mountCubeOverlay({
     else h.setAttribute('r', HANDLE_R);
     h.dataset.key = key;
     const title = svgEl('title'); title.textContent = HANDLE_TITLES[key]; h.appendChild(title);
-    bindDrag(h, key);
+    bindDrag(h, 'stage', key);
     handlesG.appendChild(h);
     handleEls.set(key, h);
   }
 
-  let dragging = null;     // { key, pointerId }
+  // House: edges, guides, labels, bar handles.
+  const houseEdgeEls = {};
+  for (const edge of HOUSE_EDGES) {
+    const l = svgEl('line', `cube-edge cube-house-edge is-${edge}`);
+    houseEdgesG.appendChild(l);
+    houseEdgeEls[edge] = l;
+  }
+  const houseGuideEls = [0, 1, 2, 3].map(() => {
+    const l = svgEl('line', 'cube-guide');
+    houseGuidesG.appendChild(l);
+    return l;
+  });
+  const houseLabelEls = HOUSE_LABEL_FIELDS.map((field) => {
+    const t = svgEl('text', 'cube-label cube-house-label');
+    t.dataset.field = field;
+    t.addEventListener('click', (e) => { e.stopPropagation(); startLabelEdit('house', field, t); });
+    houseLabelsG.appendChild(t);
+    return t;
+  });
+  const houseHandleEls = new Map();
+  for (const edge of HOUSE_EDGES) {
+    const bar = edge === 'left' || edge === 'right' ? WALL_BAR : FLOOR_BAR;
+    const h = svgEl('rect', `cube-handle cube-house-handle is-${edge}`);
+    h.setAttribute('width', bar.w); h.setAttribute('height', bar.h); h.setAttribute('rx', 3);
+    h.dataset.edge = edge;
+    const title = svgEl('title'); title.textContent = HOUSE_TITLES[edge]; h.appendChild(title);
+    bindDrag(h, 'house', edge);
+    houseHandlesG.appendChild(h);
+    houseHandleEls.set(edge, h);
+  }
+  const handleFor = (kind, key) => (kind === 'house' ? houseHandleEls.get(key) : handleEls.get(key));
+
+  let dragging = null;     // { kind, key, pointerId, startUv }
   let pendingUv = null;
   let rafId = 0;
   let clampTimer = 0;
@@ -106,8 +155,8 @@ export function mountCubeOverlay({
     rafId = 0;
     if (!dragging || !pendingUv) return;
     const uv = pendingUv; pendingUv = null;
-    const clamped = onDrag?.('stage', dragging.key, uv);
-    if (clamped) flashClamped(handleEls.get(dragging.key));
+    const clamped = onDrag?.(dragging.kind, dragging.key, uv, dragging.startUv);
+    if (clamped) flashClamped(handleFor(dragging.kind, dragging.key));
   }
   function flashClamped(el) {
     if (!el) return;
@@ -115,21 +164,21 @@ export function mountCubeOverlay({
     if (clampTimer) clearTimeout(clampTimer);
     clampTimer = setTimeout(() => { clampTimer = 0; el.classList.remove('is-clamped'); }, CLAMP_FLASH_MS);
   }
-  function bindDrag(el, key) {
+  function bindDrag(el, kind, key) {
     el.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       e.preventDefault(); e.stopPropagation();
-      dragging = { key, pointerId: e.pointerId };
+      dragging = { kind, key, pointerId: e.pointerId, startUv: uvFromEvent(e) };
       el.setPointerCapture?.(e.pointerId);
       el.classList.add('is-dragging');
     });
     el.addEventListener('pointermove', (e) => {
-      if (!dragging || dragging.key !== key) return;
+      if (!dragging || dragging.key !== key || dragging.kind !== kind) return;
       pendingUv = uvFromEvent(e);
       if (raf) { if (!rafId) rafId = raf(flushDrag); } else flushDrag();
     });
     const end = (e) => {
-      if (!dragging || dragging.key !== key) return;
+      if (!dragging || dragging.key !== key || dragging.kind !== kind) return;
       pendingUv = uvFromEvent(e) || pendingUv;
       if (rafId && typeof cancelAnimationFrame === 'function') { cancelAnimationFrame(rafId); rafId = 0; }
       flushDrag();
@@ -143,16 +192,19 @@ export function mountCubeOverlay({
 
   // ── inline label edit ──
   let labelInput = null;
-  function startLabelEdit(field, textEl) {
+  function startLabelEdit(kind, field, textEl) {
     finishLabelEdit(false);
-    const dims = getDims?.();
-    if (!dims) return;
+    const src = kind === 'house' ? getHouse?.() : getDims?.();
+    if (!src) return;
+    const ft = kind === 'house' ? houseLabelValue(src, field) : src[field];
+    if (!Number.isFinite(ft)) return;
     const units = getUnits?.() || 'ft';
     const input = document.createElement('input');
     input.className = 'cube-label-input';
     input.type = 'text'; input.inputMode = 'decimal';
-    input.value = toDisplay(dims[field], units).toFixed(1);
+    input.value = toDisplay(ft, units).toFixed(1);
     input.dataset.field = field;
+    input.dataset.kind = kind;
     const x = parseFloat(textEl.getAttribute('x')) || 0, y = parseFloat(textEl.getAttribute('y')) || 0;
     input.style.left = `${x}px`; input.style.top = `${y}px`;
     input.addEventListener('keydown', (e) => {
@@ -169,9 +221,9 @@ export function mountCubeOverlay({
     const input = labelInput;
     if (!input) return;
     labelInput = null;
-    const { field } = input.dataset; const text = input.value;
+    const { field, kind } = input.dataset; const text = input.value;
     input.remove();
-    if (commit) onLabelEdit?.('stage', field, text);
+    if (commit) onLabelEdit?.(kind || 'stage', field, text);
   }
 
   function setLine(el, a, b, dirty) {
@@ -181,22 +233,74 @@ export function mountCubeOverlay({
     el.setAttribute('x2', b[0].toFixed(1)); el.setAttribute('y2', b[1].toFixed(1));
     el.classList.toggle('is-dirty', !!dirty);
   }
+  function placeBar(el, bar, x, y) {
+    el.setAttribute('x', (x - bar.w / 2).toFixed(1));
+    el.setAttribute('y', (y - bar.h / 2).toFixed(1));
+  }
+
+  // The house cross-section: lines where the walls, floor and ceiling really
+  // project (often beyond the photo), handles and labels kept inside the
+  // image so an off-image wall can still be grabbed; such a handle is styled
+  // "off-screen" and the wall lands where it is dropped.
+  function renderHouse(cam, house, W, H, dirty, units) {
+    const e = houseEdgesPx(cam, house);
+    const L = e.left * W, R = e.right * W, F = e.floor * H, C = e.ceiling * H;
+    setLine(houseEdgeEls.left, [L, C], [L, F], dirty);
+    setLine(houseEdgeEls.right, [R, C], [R, F], dirty);
+    setLine(houseEdgeEls.floor, [L, F], [R, F], dirty);
+    setLine(houseEdgeEls.ceiling, [L, C], [R, C], dirty);
+    houseGuideEls.forEach((el, i) => {
+      const g = e.guides[i];
+      setLine(el, g && [g[0][0] * W, g[0][1] * H], g && [g[1][0] * W, g[1][1] * H], dirty);
+    });
+    const cx = (x) => Math.min(W - EDGE_MARGIN, Math.max(EDGE_MARGIN, x));
+    const cy = (y) => Math.min(H - EDGE_MARGIN, Math.max(EDGE_MARGIN, y));
+    const midX = cx((L + R) / 2), midY = cy((F + C) / 2);
+    const place = (edge, bar, x, y, off) => {
+      const el = houseHandleEls.get(edge);
+      placeBar(el, bar, x, y);
+      el.classList.toggle('is-offscreen', off);
+    };
+    place('left', WALL_BAR, cx(L), midY, L < 0 || L > W);
+    place('right', WALL_BAR, cx(R), midY, R < 0 || R > W);
+    place('floor', FLOOR_BAR, midX, cy(F), F < 0 || F > H);
+    place('ceiling', FLOOR_BAR, midX, cy(C), C < 0 || C > H);
+
+    const [widthEl, ceilingEl, dropEl] = houseLabelEls;
+    widthEl.setAttribute('x', midX.toFixed(1)); widthEl.setAttribute('y', (cy(F) + 18).toFixed(1));
+    widthEl.setAttribute('text-anchor', 'middle');
+    widthEl.textContent = formatLength(house.right_wall_ft - house.left_wall_ft, units);
+    ceilingEl.setAttribute('x', (cx(R) + 10).toFixed(1)); ceilingEl.setAttribute('y', (midY - 20).toFixed(1));
+    ceilingEl.setAttribute('text-anchor', R > W - 90 ? 'end' : 'start');
+    ceilingEl.textContent = `${formatLength(house.ceiling_ft, units)} above deck`;
+    dropEl.setAttribute('x', cx(L + (R - L) * 0.25).toFixed(1)); dropEl.setAttribute('y', (cy(F) - 8).toFixed(1));
+    dropEl.setAttribute('text-anchor', 'middle');
+    dropEl.textContent = `${formatLength(house.floor_drop_ft, units)} below deck`;
+  }
 
   function render() {
     const shown = isShown?.() || { stage: true, house: false };
     const cam = getPreviewCamera?.();
     const dims = getDims?.();
+    const house = getHouse?.();
+    const houseOk = !!house && Number.isFinite(house.left_wall_ft) && Number.isFinite(house.ceiling_ft);
     const W = canvasWrapEl?.clientWidth || 0, H = canvasWrapEl?.clientHeight || 0;
     const canDraw = !!(cam && dims && W && H);
-    overlayEl.toggleAttribute('hidden', !canDraw || (!shown.stage && !shown.house));
-    stageG.toggleAttribute('hidden', !shown.stage || !canDraw);
-    houseG.toggleAttribute('hidden', !shown.house || !canDraw);
+    const showStage = canDraw && shown.stage;
+    const showHouse = canDraw && shown.house && houseOk;
+    overlayEl.toggleAttribute('hidden', !showStage && !showHouse);
+    stageG.toggleAttribute('hidden', !showStage);
+    houseG.toggleAttribute('hidden', !showHouse);
     if (!canDraw) return;
     overlayEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    const dirty = !!isDirty?.();
+    const units = getUnits?.() || 'ft';
+    if (showHouse) renderHouse(cam, house, W, H, dirty, units);
+    if (!showStage) return;
+
     const px = (p) => { const r = worldToPixel(p, cam); return r ? [r[0] * W, r[1] * H] : null; };
     const corners = stageCorners(dims);
     const P = Object.fromEntries(Object.entries(corners).map(([k, p]) => [k, px(p)]));
-    const dirty = !!isDirty?.();
     EDGES.forEach(([a, b], i) => setLine(edgeEls[i], P[a], P[b], dirty));
 
     const hp = handlePoints(cam, dims);
@@ -206,11 +310,10 @@ export function mountCubeOverlay({
       if (!p) { el.setAttribute('visibility', 'hidden'); continue; }
       el.removeAttribute('visibility');
       const x = p[0] * W, y = p[1] * H;
-      if (key === 'top') { el.setAttribute('x', (x - TOP_BAR.w / 2).toFixed(1)); el.setAttribute('y', (y - TOP_BAR.h / 2).toFixed(1)); }
+      if (key === 'top') placeBar(el, TOP_BAR, x, y);
       else { el.setAttribute('cx', x.toFixed(1)); el.setAttribute('cy', y.toFixed(1)); }
     }
 
-    const units = getUnits?.() || 'ft';
     LABELS.forEach((spec, i) => {
       const el = labelEls[i];
       const a = P[spec.a], b = P[spec.b];
@@ -221,7 +324,7 @@ export function mountCubeOverlay({
       el.setAttribute('text-anchor', spec.dx < 0 ? 'end' : 'middle');
       el.textContent = formatLength(dims[spec.field], units);
     });
-    void getDraft; void getHouse;   // house box: Task 4
+    void getDraft;
   }
 
   function destroy() {

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   stageCorners, guessCamera, handlePoints, marksFromCamera, applyHandleDrag, clampStageDrag,
   houseEdgesPx, housePxToFt, clampHouse, cameraFromGizmoDelta, MIN_LIP_FRACTION,
+  houseForDims, houseDragPatch, houseWidthPatch,
 } from '../../../src/metric/cube-geometry.js';
+import { defaultHouse } from '../../../src/rig/geometry.js';
 import { solveCamera, validateMarks, worldToPixel, SYNTHETIC_STAGE } from '../../../src/metric/calibration.js';
 
 const { record, aspect } = SYNTHETIC_STAGE;
@@ -143,4 +145,41 @@ test('cameraFromGizmoDelta: dz adds to dist, dy to height, dx shifts u_c; re-sol
   near(side.camera.u_c, cam.u_c + 5 * cam.f / cam.dist_ft);
   near(side.marks.top[0], side.camera.u_c);
   assert.deepEqual(validateMarks({ ...DIMS, marks: side.marks }), { ok: true, errors: [] });
+});
+
+test('houseForDims: an estimated house is re-derived from the dims, an edited one is clamped to them, garbage becomes the default', () => {
+  const est = { left_wall_ft: -30, right_wall_ft: 30, floor_drop_ft: 3, ceiling_ft: 30, depth_ft: 60, estimated: true };
+  const wide = { width_ft: 70, height_ft: 25, depth_ft: 40 };
+  assert.deepEqual(houseForDims(est, wide), defaultHouse(wide));
+  const edited = { ...est, estimated: false };
+  const h = houseForDims(edited, wide);
+  assert.equal(h.estimated, false);
+  assert.ok(h.right_wall_ft - h.left_wall_ft >= 70 - 1e-9, 'walls at least the stage width apart');
+  assert.ok(h.ceiling_ft > 25, 'ceiling above the opening');
+  assert.equal(h.floor_drop_ft, 3); assert.equal(h.depth_ft, 60);
+  const fits = { ...edited, left_wall_ft: -40, right_wall_ft: 40, ceiling_ft: 35 };
+  assert.deepEqual(houseForDims(fits, wide), fits, 'an edited house that already fits is untouched');
+  assert.deepEqual(houseForDims(null, wide), defaultHouse(wide));
+  assert.deepEqual(houseForDims({}, wide), defaultHouse(wide));
+  assert.equal(est.estimated, true, 'input not mutated');
+});
+
+test('houseDragPatch: wall drags set X from u, floor/ceiling drags set Y from v; dropping a handle where it sits changes nothing', () => {
+  const cam = solveCamera(record, aspect);
+  const house = { left_wall_ft: -30, right_wall_ft: 30, floor_drop_ft: 3, ceiling_ft: 30, depth_ft: 60, estimated: true };
+  const e = houseEdgesPx(cam, house);
+  near(houseDragPatch(cam, 'left', [e.left, 0.5]).left_wall_ft, -30);
+  near(houseDragPatch(cam, 'right', [e.right, 0.5]).right_wall_ft, 30);
+  near(houseDragPatch(cam, 'floor', [0.5, e.floor]).floor_drop_ft, 3);
+  near(houseDragPatch(cam, 'ceiling', [0.5, e.ceiling]).ceiling_ft, 30);
+  assert.deepEqual(Object.keys(houseDragPatch(cam, 'left', [0.2, 0.5])), ['left_wall_ft'], 'one key per edge');
+  assert.ok(houseDragPatch(cam, 'ceiling', [0.5, e.ceiling - 0.1]).ceiling_ft > 30, 'dragging the ceiling up raises it');
+  assert.ok(houseDragPatch(cam, 'floor', [0.5, e.floor + 0.1]).floor_drop_ft > 3, 'dragging the floor down deepens the drop');
+  assert.throws(() => houseDragPatch(cam, 'roof', [0.5, 0.5]));
+});
+
+test('houseWidthPatch keeps the walls centred and sets their distance', () => {
+  const p = houseWidthPatch({ left_wall_ft: -20, right_wall_ft: 40 }, 30);
+  near(p.left_wall_ft, -5); near(p.right_wall_ft, 25);
+  assert.deepEqual(Object.keys(p).sort(), ['left_wall_ft', 'right_wall_ft']);
 });

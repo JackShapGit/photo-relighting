@@ -9,12 +9,23 @@
 // box is cube-overlay-2d.js, the draft/history reducer is
 // calibration-draft.js, and main.js owns both plus the preview camera.
 import { validateMarks, fitDepth } from './calibration.js';
+import { clampHouse } from './cube-geometry.js';
 import { toDisplay, fromDisplay } from './units.js';
 
 const CROSS_CHECK_WARN_PCT = 20;
 const HEIGHT_WARN_PCT = 10;
 const PERSPECTIVE_WARN = 0.9;
 const HEIGHT_REFS = [['deck', 'Deck'], ['house_floor', 'House floor'], ['ceiling', 'Ceiling']];
+// House fields (calibration cube spec §House box): typed values go through
+// clampHouse; a value the clamp would alter is rejected with its rule.
+const HOUSE_FIELDS = [
+  ['left_wall_ft', 'Left wall', 'The left wall must sit at least the stage width from the right wall'],
+  ['right_wall_ft', 'Right wall', 'The right wall must sit at least the stage width from the left wall'],
+  ['floor_drop_ft', 'Floor drop', 'The house floor is at or below the deck (0 or more)'],
+  ['ceiling_ft', 'Ceiling', 'The ceiling must clear the opening height'],
+  ['depth_ft', 'House depth', 'House depth must be at least 1 ft'],
+];
+const REJECT_FLASH_MS = 600;
 const crossCheckMessage = (pct) =>
   `Metric depth model disagrees with your marks by ${Math.round(pct)}%; recheck the lip and back-line handles.`;
 
@@ -99,7 +110,12 @@ export function mountCalibrationPanel({
       <button type="button" data-unit="ft" aria-pressed="true">ft</button>
       <button type="button" data-unit="m" aria-pressed="false">m</button>
     </div>
-    <div class="cal-house" hidden></div>
+    <div class="cal-house" hidden>
+      <div class="cal-house-title">House</div>
+      ${HOUSE_FIELDS.map(([k, l]) => `<label>${l} <input type="number" step="0.1" data-house="${k}" /></label>`).join('')}
+      <div class="cal-house-note" hidden>House dimensions are estimates until you set them.</div>
+      <div class="cal-house-msg" hidden></div>
+    </div>
     <label>Default height reference
       <select class="cal-href">${HEIGHT_REFS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
     </label>
@@ -143,6 +159,7 @@ export function mountCalibrationPanel({
         else if (Number.isFinite(v)) el.value = toDisplay(fromDisplay(v, prev), units).toFixed(1);
         if (untouched) shown[key] = el.value;
       }
+      fillHouse();                             // house values are exact feet in the draft: just re-show them
     }
   }
   panelEl.querySelector('.cal-units').addEventListener('click', (e) => {
@@ -178,6 +195,49 @@ export function mountCalibrationPanel({
       render();
     });
   }
+  // ── house fields: typed in the current unit, clamped through clampHouse ──
+  const houseEl = $('.cal-house');
+  const houseNoteEl = $('.cal-house-note'), houseMsgEl = $('.cal-house-msg');
+  const houseInputs = HOUSE_FIELDS.map(([k, , rule]) => [k, houseEl.querySelector(`input[data-house="${k}"]`), rule]);
+  const houseShown = {};
+  function fillHouse() {
+    const h = draft()?.house;
+    const ok = !!h && Number.isFinite(h.left_wall_ft);
+    houseEl.hidden = !ok;
+    if (!ok) return;
+    for (const [k, el] of houseInputs) {
+      if (document.activeElement === el) continue;
+      el.value = Number.isFinite(h[k]) ? toDisplay(h[k], units).toFixed(1) : '';
+      houseShown[k] = el.value;
+    }
+    houseNoteEl.hidden = !h.estimated;
+  }
+  let rejectTimer = 0;
+  function rejectHouse(el, key, msg) {
+    el.value = houseShown[key] ?? '';
+    el.classList.remove('is-rejected');
+    void el.offsetWidth;                     // restart the flash
+    el.classList.add('is-rejected');
+    if (rejectTimer) clearTimeout(rejectTimer);
+    rejectTimer = setTimeout(() => { rejectTimer = 0; el.classList.remove('is-rejected'); }, REJECT_FLASH_MS);
+    houseMsgEl.hidden = false;
+    houseMsgEl.textContent = msg;
+  }
+  for (const [key, el, rule] of houseInputs) {
+    el.addEventListener('change', () => {
+      const d = draft();
+      if (!d?.house || !d.dims) return;
+      const v = parseFloat(el.value);
+      if (!Number.isFinite(v)) { rejectHouse(el, key, 'Enter a number'); return; }
+      const ft = fromDisplay(v, units);
+      const clamped = clampHouse(d.house, d.dims, { [key]: ft });
+      if (Math.abs(clamped[key] - ft) > 1e-6) { rejectHouse(el, key, rule); return; }
+      houseMsgEl.hidden = true;
+      dispatch?.({ type: 'edit', patch: { house: clamped } });
+      render();
+    });
+  }
+
   let defaultHeightRef = 'deck';
   $('.cal-href').addEventListener('change', (e) => {
     defaultHeightRef = e.target.value;
@@ -220,6 +280,8 @@ export function mountCalibrationPanel({
     const d = S?.draft || null;
     const st = getState();
     fillDims();
+    fillHouse();
+    if (!S?.dirty) houseMsgEl.hidden = true;   // a rejection message lives only while the draft is being edited
     const venue = typeof getVenue === 'function' ? getVenue() : null;
     const noteEl = $('.cal-note');
     noteEl.hidden = !venue;
