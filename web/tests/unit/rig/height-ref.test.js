@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   HEIGHT_REFS, toDeck, fromDeck, recomputePositionsForHouse, recomputeBoomFixturesForHouse, describeHeight,
-  positionWithHeightRef, positionWithHeightInput, fixtureWithHeightInput,
+  positionWithHeightRef, positionWithHeightInput, fixtureWithHeightInput, restateBoomFixturesForRefChange,
 } from '../../../src/rig/height-ref.js';
 import { defaultHouse } from '../../../src/rig/geometry.js';
 
@@ -104,4 +104,31 @@ test('fixtureWithHeightInput sets a boom fixture height in the position referenc
   const deckBoom = { ...boom, height_ref: 'deck' };
   fixtureWithHeightInput(L, 9, deckBoom, HOUSE);
   assert.equal(L.fixture.offset_ft, 9); assert.equal('height_input_ft' in L.fixture, false, 'deck: no stated number kept');
+});
+
+test('restateBoomFixturesForRefChange: switching a boom reference re-states its fixtures from their deck height so they do not move', () => {
+  const boom = { id: 'b', name: 'Boom', kind: 'boom', offset_ft: -22, upstage_ft: 8, height_ref: 'deck' };
+  const at = (ref) => ({ ...boom, height_ref: ref });
+  const L = { id: 'L', fixture: { type: 'ers', position_id: 'b', offset_ft: 8, area: null } };
+  const other = { id: 'O', fixture: { type: 'ers', position_id: 'p', offset_ft: 3, area: null } };
+  // deck → ceiling: the stated number becomes ceiling − 8; the deck height stays 8, also through the recompute.
+  assert.equal(restateBoomFixturesForRefChange([L, other], [boom], [at('ceiling')], HOUSE), 1);
+  assert.equal(L.fixture.offset_ft, 8);
+  assert.equal(L.fixture.height_input_ft, 22);
+  recomputeBoomFixturesForHouse([L], [at('ceiling')], HOUSE);
+  assert.equal(L.fixture.offset_ft, 8);
+  assert.equal(other.fixture.height_input_ft, undefined, 'a fixture on another position is untouched');
+  // house floor (typed 11 → offset 8) → ceiling: 22, offset still 8 (the review case).
+  const L2 = { id: 'L2', fixture: { type: 'ers', position_id: 'b', offset_ft: 8, height_input_ft: 11, area: null } };
+  restateBoomFixturesForRefChange([L2], [at('house_floor')], [at('ceiling')], HOUSE);
+  assert.equal(L2.fixture.offset_ft, 8);
+  assert.equal(L2.fixture.height_input_ft, 22);
+  recomputeBoomFixturesForHouse([L2], [at('ceiling')], HOUSE);
+  assert.equal(L2.fixture.offset_ft, 8);
+  // → deck drops the stated number; an unchanged reference is a no-op.
+  restateBoomFixturesForRefChange([L2], [at('ceiling')], [at('deck')], HOUSE);
+  assert.equal(L2.fixture.height_input_ft, undefined);
+  assert.equal(L2.fixture.offset_ft, 8);
+  assert.equal(restateBoomFixturesForRefChange([L, L2], [at('ceiling')], [at('ceiling')], HOUSE), 0);
+  assert.equal(restateBoomFixturesForRefChange([L], [], [at('ceiling')], HOUSE), 0, 'a new boom has nothing to re-state');
 });

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { badgeText, venueFromForm } from '../../../src/rig/venue-editor.js';
-import { SYNTHETIC_VENUE } from '../../../src/rig/geometry.js';
+import { SYNTHETIC_VENUE, defaultHouse } from '../../../src/rig/geometry.js';
 
 const V = SYNTHETIC_VENUE;
 const near = (a, b, t = 1e-6) => assert.ok(Math.abs(a - b) <= t, `${a} !~ ${b}`);
@@ -93,4 +93,17 @@ test('venueFromForm: a house value the clamp would alter is reported with its ru
   assert.deepEqual(run({ ceiling: '25', floor_drop: '0', depth: '1', left: '-10', right: '30' }).errors, [], 'edge values pass');
   const m = venueFromForm(form({ width: '12.2', height: '6.1', depth: '9.1', house: houseForm({ ceiling: '5', left: '-9', right: '9', floor_drop: '1', depth: '18' }), house_edited: true }), 'm', { ...V, house: HOUSE });
   assert.ok(m.errors.some((e) => /ceiling/i.test(e) && e.includes(' m)')), 'rule stated in the form unit: ' + m.errors.join(' | '));
+});
+
+test('venueFromForm: a dims-only edit re-derives an estimated house silently and reports the rule for an edited house that no longer fits', () => {
+  const est = venueFromForm(form({ width: '60' }), 'ft', { ...V, house: HOUSE });
+  assert.deepEqual(est.errors, []);
+  assert.deepEqual(est.venue.house, defaultHouse({ width_ft: 60, height_ft: 20, depth_ft: 30 }));
+  const edited = venueFromForm(form({ width: '70' }), 'ft', { ...V, house: { ...HOUSE, estimated: false } });
+  assert.ok(edited.errors.some((e) => /walls/i.test(e) && e.includes('70.0 ft')), edited.errors.join(' | '));
+  const tall = venueFromForm(form({ height: '30' }), 'ft', { ...V, house: { ...HOUSE, estimated: false } });
+  assert.ok(tall.errors.some((e) => /ceiling/i.test(e) && e.includes('30.5 ft')), tall.errors.join(' | '));
+  const fits = venueFromForm(form({ width: '50' }), 'ft', { ...V, house: { ...HOUSE, estimated: false } });
+  assert.deepEqual(fits.errors, []);
+  assert.deepEqual(fits.venue.house, { ...HOUSE, estimated: false });
 });

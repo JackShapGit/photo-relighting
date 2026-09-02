@@ -17,7 +17,7 @@ import {
   listVenues, createVenue, getVenue, updateVenue, duplicateVenue, deleteVenue,
 } from './api.js';
 import { mergeVenueIntoCalibration, defaultHouse } from './rig/geometry.js';
-import { recomputePositionsForHouse, recomputeBoomFixturesForHouse } from './rig/height-ref.js';
+import { recomputePositionsForHouse, recomputeBoomFixturesForHouse, restateBoomFixturesForRefChange } from './rig/height-ref.js';
 import { rigMode, buildRigTree } from './rig/tree-mirror.js';
 import { syncRig, syncAllFixtures, detachFixture, detachAim } from './rig/fixture-sync.js';
 import { applyFixturePreset } from './rig/presets.js';
@@ -142,7 +142,14 @@ function withHouse(v) {
 // ceiling are re-derived (pipe trims on the positions, fixture heights on
 // booms) so they stay where the user stated them when the house changed.
 function prepareVenueForSave(venue) {
-  const house = venue.house || defaultHouse(venue);
+  // The house must satisfy the venue rules for the dims being written: an
+  // estimated house follows them, an edited one is clamped to them (the
+  // API rejects walls narrower than the stage or a ceiling below the opening).
+  const house = houseForDims(venue.house || null, { width_ft: venue.width_ft, height_ft: venue.height_ft, depth_ft: venue.depth_ft });
+  // A boom whose reference changed re-states its fixtures from their deck
+  // height first, so the recompute below cannot read a number stated in the
+  // old reference and move them.
+  restateBoomFixturesForRefChange(state.lights, state.venue?.positions, venue.positions, house);
   const positions = recomputePositionsForHouse(venue.positions, house);
   recomputeBoomFixturesForHouse(state.lights, positions, house);
   return { ...venue, house, positions };

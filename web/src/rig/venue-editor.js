@@ -25,6 +25,17 @@ export function badgeText(venue, units = 'ft') {
   return `${venue.name} · ${f(venue.width_ft)} × ${f(venue.height_ft)} × ${f(venue.depth_ft)} ${u}`;
 }
 
+/** The rule behind each house field the clamp had to alter (`wanted` = the values as stated). */
+function houseRuleErrors(house, wanted, dims, units) {
+  const errors = [];
+  const altered = (f) => f in wanted && Math.abs(house[f] - wanted[f]) > 1e-6;
+  if (altered('floor_drop_ft')) errors.push('Floor drop must be zero or more (the house floor is at or below the deck)');
+  if (altered('ceiling_ft')) errors.push(`Ceiling must clear the opening height (at least ${formatLength(dims.height_ft + 0.5, units)})`);
+  if (altered('left_wall_ft') || altered('right_wall_ft')) errors.push(`Walls must be at least the stage width apart (${formatLength(dims.width_ft, units)})`);
+  if (altered('depth_ft')) errors.push(`House depth must be at least ${formatLength(1, units)}`);
+  return errors;
+}
+
 function clampGrid(v) {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return 3;
@@ -60,25 +71,33 @@ export function venueFromForm(values, units = 'ft', base = {}) {
     focus_height_ft,
     positions: values.positions || base.positions || [],
   };
-  // House (calibration cube): untouched fields keep the base house as is
-  // (still `estimated`); edited fields are parsed in the unit and run through
-  // clampHouse. A value the clamp would alter is reported with its rule (the
-  // clamped value is kept on the venue, but the errors block Save).
+  // House (calibration cube). Edited house fields are parsed in the unit and
+  // run through clampHouse; a value the clamp would alter is reported with
+  // its rule (the clamped value is kept on the venue, but the errors block
+  // Save). With no house edit the house is still checked against the PARSED
+  // dims: an estimated house follows them silently (as the draft does live),
+  // an edited one that no longer clears the rules reports the rule — so a
+  // dims-only edit can never reach the API with a house it rejects.
   let house = base.house || null;
+  const dims = Number.isFinite(width_ft) && Number.isFinite(height_ft) && Number.isFinite(depth_ft)
+    ? { width_ft, height_ft, depth_ft } : null;
   if (values.house && values.house_edited) {
     const patch = {};
     for (const [key, label, field] of HOUSE_FIELDS) {
       const ft = parseLength(String(values.house[key] ?? ''), units);
       if (ft == null) errors.push(`${label} must be a length`); else patch[field] = ft;
     }
-    if (Number.isFinite(width_ft) && Number.isFinite(height_ft) && Number.isFinite(depth_ft)) {
-      const dims = { width_ft, height_ft, depth_ft };
+    if (dims) {
       house = clampHouse(house || defaultHouse(dims), dims, patch);
-      const altered = (f) => f in patch && Math.abs(house[f] - patch[f]) > 1e-6;
-      if (altered('floor_drop_ft')) errors.push('Floor drop must be zero or more (the house floor is at or below the deck)');
-      if (altered('ceiling_ft')) errors.push(`Ceiling must clear the opening height (at least ${formatLength(height_ft + 0.5, units)})`);
-      if (altered('left_wall_ft') || altered('right_wall_ft')) errors.push(`Walls must be at least the stage width apart (${formatLength(width_ft, units)})`);
-      if (altered('depth_ft')) errors.push(`House depth must be at least ${formatLength(1, units)}`);
+      errors.push(...houseRuleErrors(house, patch, dims, units));
+    }
+  } else if (house && dims) {
+    if (house.estimated || !Number.isFinite(house.left_wall_ft)) {
+      house = defaultHouse(dims);
+    } else {
+      const clamped = clampHouse(house, dims, { left_wall_ft: house.left_wall_ft });
+      errors.push(...houseRuleErrors(clamped, house, dims, units));
+      house = clamped;
     }
   }
   if (house) venue.house = house;

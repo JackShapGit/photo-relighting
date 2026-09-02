@@ -57,6 +57,32 @@ export function recomputeBoomFixturesForHouse(lights, positions, house) {
   return n;
 }
 
+/**
+ * A boom's height reference changed between two copies of the positions:
+ * re-state every fixture hung on it from its deck height in the new
+ * reference (the stated number moves, the physical height does not), so
+ * the recompute that follows a venue write cannot read a number stated in
+ * the old reference. Deck drops the stated number. Mutates the fixture
+ * blocks; returns the count.
+ */
+export function restateBoomFixturesForRefChange(lights, prevPositions, nextPositions, house) {
+  const prev = new Map((prevPositions || []).map((p) => [p.id, p]));
+  let n = 0;
+  for (const p of nextPositions || []) {
+    if (p.kind !== 'boom') continue;
+    const before = prev.get(p.id);
+    const ref = p.height_ref || 'deck';
+    if (!before || (before.height_ref || 'deck') === ref) continue;
+    for (const L of lights || []) {
+      const f = L?.fixture;
+      if (!f || f.position_id !== p.id || !Number.isFinite(f.offset_ft)) continue;
+      if (ref === 'deck') delete f.height_input_ft; else f.height_input_ft = fromDeck(f.offset_ft, ref, house);
+      n += 1;
+    }
+  }
+  return n;
+}
+
 /** Switch a position's reference; the shown number converts so the physical height does not move. */
 export function positionWithHeightRef(position, ref, house) {
   const next = { ...position, height_ref: ref };
