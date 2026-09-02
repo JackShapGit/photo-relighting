@@ -124,6 +124,34 @@ export function syncLightsFromEngineEdits(lights, record) {
   }
 }
 
+/** Spec 2 hook: a direct move makes a rig fixture Custom (position_id null),
+ * keeping its coordinates. No-op for lights without a fixture block. */
+export function markCustom(L) {
+  if (L.fixture && L.fixture.position_id != null) L.fixture.position_id = null;
+  return L;
+}
+
+/**
+ * Which engine-space edits are pending on a calibrated light, i.e. what
+ * syncLightsFromEngineEdits is about to re-derive feet from:
+ *   moved      — the 2D handle / Z slider moved the engine position;
+ *   retargeted — the target handle moved the engine target, or aim-at-target
+ *                was switched off (target null while target_ft exists).
+ * The rig uses this to detach fixtures before re-hanging them.
+ */
+export function engineEdits(L, record) {
+  const moved = !!(L.position_eng && !vecEq(L.position, L.position_eng));
+  let retargeted = false;
+  if (L.target_ft) {
+    if (!Array.isArray(L.target)) retargeted = true;
+    else {
+      const t = worldToEngine(L.target_ft, record.camera, effectiveFit(record));
+      retargeted = !!t && !vecEq(L.target, t);
+    }
+  }
+  return { moved, retargeted };
+}
+
 export function clearMetric(L) {
   for (const k of ['position_ft', 'target_ft', 'direction_ft', 'position_eng', 'direction_eng', 'falloff_ft']) delete L[k];
   if (L.type === 'linear') {

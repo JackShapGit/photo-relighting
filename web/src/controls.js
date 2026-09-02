@@ -11,6 +11,8 @@ import { PRESETS } from './presets.js';
 import { isTargeted, targetSpawnPoint, applyTargeting } from './targeting.js';
 import { toDisplay, parseLength } from './metric/units.js';
 import { syncLightFromFeet } from './metric/light-metric.js';
+import { FIXTURE_TYPES } from './rig/presets.js';
+import { detachFixture, detachAim } from './rig/fixture-sync.js';
 
 const SLOT_VARS = ['--slot-key', '--slot-fill', '--slot-rim'];
 
@@ -107,15 +109,31 @@ export function renderAddLightPicker(state, container, onPick) {
         </button>
       `).join('')}
     </div>
+    <h3 class="preset-section">Fixtures</h3>
+    <p class="props-empty">Theatre instruments. Added as Custom; the Rig tab hangs them on a position.</p>
+    <div class="preset-grid">
+      ${FIXTURE_TYPES.map((t) => `
+        <button class="preset-card fixture-card" type="button" data-fixture="${t.id}" title="${escapeHtml(t.label)}">
+          <div class="preset-thumb"><span class="preset-glyph">◆</span></div>
+          <div class="preset-name">${escapeHtml(t.label)}</div>
+        </button>
+      `).join('')}
+    </div>
     <div class="modal-actions">
       <button id="add-cancel" type="button">Cancel</button>
     </div>
   `;
-  for (const card of container.querySelectorAll('.preset-card')) {
+  for (const card of container.querySelectorAll('.preset-card:not(.fixture-card)')) {
     card.addEventListener('click', () => {
       const id = card.dataset.id;
       const preset = PRESETS.find((p) => p.id === id);
       onPick?.(preset || null);
+    });
+  }
+  for (const card of container.querySelectorAll('.fixture-card')) {
+    card.addEventListener('click', () => {
+      const t = FIXTURE_TYPES.find((x) => x.id === card.dataset.fixture);
+      onPick?.(t ? { kind: 'fixture', id: t.id, label: t.label } : null);
     });
   }
   container.querySelector('#add-cancel').addEventListener('click', () => onPick?.(null));
@@ -310,6 +328,8 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
       const ft = parseLength(e.target.value, units);
       if (ft == null) return;
       L[arrKey][i] = ft;
+      // Typed feet are a direct move (Custom) or a direct aim (no area).
+      if (arrKey === 'position_ft') detachFixture(L); else detachAim(L);
       syncLightFromFeet(L, state.calibration);
       applyTargeting(L);
       e.target.value = toDisplay(ft, units).toFixed(1);

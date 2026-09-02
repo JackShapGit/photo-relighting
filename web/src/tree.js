@@ -15,6 +15,9 @@ import {
   newGroupNode, cloneNode, deleteNode, moveNode, isInsideNode,
 } from './lights.js';
 import { showContextMenu } from './context-menu.js';
+import { rigMode, RIG_GROUP_TOOLTIP } from './rig/tree-mirror.js';
+import { enabledEmitterCount, canEnable } from './rig/fixture-sync.js';
+import { MAX_EMITTERS } from './webgl/renderer.js';
 
 const SLOT_VARS = ['--slot-key', '--slot-fill', '--slot-rim'];
 
@@ -31,6 +34,12 @@ export function mountTree(state, onSelect, onChange, onRequestAddLight) {
   }
 
   function render() {
+    // Rig mode: groups are generated from the venue, so there is no "+ Group".
+    const addGroupBtn = document.getElementById('add-group-btn');
+    if (addGroupBtn) {
+      addGroupBtn.hidden = rigMode(state);
+      addGroupBtn.title = rigMode(state) ? RIG_GROUP_TOOLTIP : '';
+    }
     root.innerHTML = '';
     root.appendChild(makeSceneRow());
     for (const node of state.tree) root.appendChild(renderNode(node, 0));
@@ -115,12 +124,14 @@ export function mountTree(state, onSelect, onChange, onRequestAddLight) {
     li.appendChild(span('tree-icon', '🗂'));
     li.appendChild(span('tree-name', G.name));
     li.appendChild(eyeButton(G));
+    if (rigMode(state)) li.title = RIG_GROUP_TOOLTIP;   // generated group: no rename / regroup
     li.addEventListener('click', (e) => {
       if (e.target.closest('.tree-eye, .tree-chevron')) return;
       selectId(G.id);
     });
     li.addEventListener('dblclick', (e) => {
       if (e.target.closest('.tree-eye, .tree-chevron')) return;
+      if (rigMode(state)) return;
       startRename(G, li);
     });
     li.addEventListener('contextmenu', (e) => openContextMenu(e, G));
@@ -140,12 +151,33 @@ export function mountTree(state, onSelect, onChange, onRequestAddLight) {
     btn.title = node.enabled ? 'Disable' : 'Enable';
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (!node.enabled) {
+        // Spec 2: at most MAX_EMITTERS emitters may be on at once. A group
+        // needs room for every light it would switch on.
+        const ok = node.kind === 'group'
+          ? countDisabledEmitters(node) <= MAX_EMITTERS - enabledEmitterCount(state.lights)
+          : canEnable(state.lights, node);
+        if (!ok) {
+          btn.title = `${MAX_EMITTERS} lights maximum; disable one first`;
+          console.warn(`enable refused: ${MAX_EMITTERS} lights maximum; disable one first`);
+          return;
+        }
+      }
       node.enabled = !node.enabled;
       if (node.kind === 'group') cascadeEnabled(node);
       render();
       onChange?.();
     });
     return btn;
+  }
+
+  function countDisabledEmitters(group) {
+    let n = 0;
+    for (const c of group.children) {
+      if (c.kind === 'group') n += countDisabledEmitters(c);
+      else if (c.type !== 'reflector' && c.enabled === false) n += 1;
+    }
+    return n;
   }
 
   function makeRootDropzone() {
@@ -195,6 +227,12 @@ export function mountTree(state, onSelect, onChange, onRequestAddLight) {
   // ─── Drag-and-drop ─────────────────────────────────────────────────────
 
   function setupDrag(li, node) {
+    if (rigMode(state)) {
+      // Generated groups: a light's group is its hang position, so there is
+      // nothing to regroup by hand (the rig tab re-hangs fixtures).
+      li.draggable = false;
+      return;
+    }
     li.draggable = true;
     li.addEventListener('dragstart', (e) => {
       draggedId = node.id;
@@ -268,6 +306,7 @@ export function mountTree(state, onSelect, onChange, onRequestAddLight) {
   // ─── Inline rename ─────────────────────────────────────────────────────
 
   function startRename(node, rowEl) {
+    if (node.kind === 'group' && rigMode(state)) return;   // generated group names come from the venue
     const nameSpan = rowEl.querySelector('.tree-name');
     if (!nameSpan) return;
     const input = document.createElement('input');
@@ -302,17 +341,18 @@ export function mountTree(state, onSelect, onChange, onRequestAddLight) {
     e.stopPropagation();
     const items = [];
     // Add commands available everywhere (Scene, Group, Light)
+    const rig = rigMode(state);   // generated groups: no group commands, no group rename
     if (node === null || node.kind === 'group') {
       items.push({ label: '+ Add Light', cmd: 'add-light' });
-      items.push({ label: '+ Add Group', cmd: 'add-group' });
+      if (!rig) items.push({ label: '+ Add Group', cmd: 'add-group' });
     } else {
       // Light: Add adds as sibling
       items.push({ label: '+ Add Light (sibling)', cmd: 'add-light-sibling' });
-      items.push({ label: '+ Add Group (sibling)', cmd: 'add-group-sibling' });
+      if (!rig) items.push({ label: '+ Add Group (sibling)', cmd: 'add-group-sibling' });
     }
     if (node !== null) {
       items.push({ divider: true });
-      items.push({ label: 'Rename', cmd: 'rename' });
+      if (!(rig && node.kind === 'group')) items.push({ label: 'Rename', cmd: 'rename' });
       items.push({ label: 'Clone', cmd: 'clone' });
       items.push({ label: 'Delete', cmd: 'delete' });
     }
@@ -357,6 +397,7 @@ export function mountTree(state, onSelect, onChange, onRequestAddLight) {
   }
 
   function doAddGroup(parentNode) {
+    if (rigMode(state)) return;
     const arr = parentNode === null ? state.tree : parentNode.children;
     const G = newGroupNode({ name: uniqueGroupName() });
     arr.push(G);
@@ -374,6 +415,7 @@ export function mountTree(state, onSelect, onChange, onRequestAddLight) {
   }
 
   function doAddGroupSibling(node) {
+    if (rigMode(state)) return;
     const parent = findParentArray(state.tree, node.id);
     const idx = parent.indexOf(node);
     const G = newGroupNode({ name: uniqueGroupName() });

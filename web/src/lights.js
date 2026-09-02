@@ -77,11 +77,12 @@ export function defaultLight(slot) {
   };
 }
 
-export function newLightNode({ name = 'Light', type = 'directional' } = {}) {
+export function newLightNode({ name = 'Light', type = 'directional', fixture = null } = {}) {
   const L = defaultLight('fill');         // sensible fill-style defaults
   L.id = newId();
   L.name = name;
   L.type = type;
+  if (fixture) L.fixture = { ...fixture };   // Spec 2 rig fixture block (see rig/fixture-sync.js)
   return L;
 }
 

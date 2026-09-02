@@ -1,5 +1,5 @@
 import {
-  newState, newLightNode, newGroupNode, syncLights,
+  newState, newLightNode, newGroupNode, syncLights, findNode,
   ADD_LIGHT_ID, lightFromPreset, defaultSceneState,
   deleteNode, SCENE_ID,
 } from './lights.js';
@@ -16,6 +16,9 @@ import {
   listVenues, createVenue, getVenue, updateVenue,
 } from './api.js';
 import { mergeVenueIntoCalibration } from './rig/geometry.js';
+import { rigMode, buildRigTree } from './rig/tree-mirror.js';
+import { syncRig, syncAllFixtures, detachFixture, detachAim } from './rig/fixture-sync.js';
+import { applyFixturePreset } from './rig/presets.js';
 import {
   invalidatePolish,
   onPolishChange,
@@ -165,6 +168,7 @@ async function syncVenueWithCalibration(record) {
       return;
     }
     updateBadge();
+    tree?.render();     // a venue-less scene just gained one: rig mode starts here
     scheduleSave();
   } catch (e) {
     console.warn('venue sync failed', e);
@@ -247,8 +251,7 @@ const refreshProps = () => {
 };
 
 function commitPlacedLight(L, insertAt) {
-  const where = insertAt || { parentArr: state.tree, index: state.tree.length };
-  where.parentArr.splice(where.index, 0, L);
+  insertLight(L, insertAt);
   state.selectedId = L.id;
   // Click-placement produces engine-space coordinates; derive feet when calibrated.
   if (state.calibration && L.type !== 'reflector') syncLightFromEngine(L, state.calibration);
@@ -269,7 +272,35 @@ function updatePlacedLight(L) {
 // aim-at-target toggle, newly added lights) funnels through here before a
 // redraw or save, so the feet fields the metric renderer reads never lag.
 function syncDraggedLights() {
-  if (state.calibration) syncLightsFromEngineEdits(state.lights, state.calibration);
+  // Spec 2 order: direct moves detach, the rig re-hangs attached fixtures,
+  // then the Spec 1 engine-edit sync runs last so custom edits win.
+  if (!state.calibration) return;
+  const detached = syncRig(state.lights, state.venue, state.calibration);
+  // A handle drag that detached a fixture moves it to the Custom group: the
+  // tree must regroup now, not on the next structural change.
+  if (detached && rigMode(state)) tree?.render();
+}
+
+// Put a new light into the tree. In rig mode the groups are generated from
+// the venue (rebuildRigTree), so the requested slot is meaningless and may
+// even be a stale array from a previous rebuild: append and let the next
+// rebuild file the light under its position (Custom for a new one).
+function insertLight(L, insertAt) {
+  if (rigMode(state)) { state.tree.push(L); return; }
+  const where = insertAt || { parentArr: state.tree, index: state.tree.length };
+  where.parentArr.splice(where.index, 0, L);
+}
+
+// Re-flatten the lights and, in a calibrated scene with a venue, regenerate
+// the tree's groups from the hang positions (spec: Lights tab in calibrated
+// scenes). Light nodes keep their identity; only the group shells are rebuilt.
+function rebuildRigTree() {
+  syncLights(state);
+  if (!rigMode(state)) return;
+  state.tree = buildRigTree(state.lights, state.venue, state.tree);
+  syncLights(state);
+  const sel = state.selectedId;
+  if (sel && sel !== SCENE_ID && sel !== ADD_LIGHT_ID && !findNode(state.tree, sel)) state.selectedId = SCENE_ID;
 }
 const onHandlesChange = () => { syncDraggedLights(); redrawAndSave(); };
 
@@ -323,8 +354,26 @@ function onPickPreset(preset) {
   }
   const insertAt = pendingAddLight || { parentArr: state.tree, index: state.tree.length };
   const prevSelection = lastSelectedBeforePicker;   // remember what was selected before the picker
-  const L = lightFromPreset(preset);
-  L.name = uniqueName(preset.name);
+  let L;
+  if (preset.kind === 'fixture') {
+    // A theatre instrument (Spec 2): a Custom fixture of the chosen type.
+    // The rig tab hangs it on a position; until then it is placed like any
+    // other light (click-placement, or the default spot for a cyc bar).
+    L = newLightNode({
+      name: uniqueName(preset.label), type: 'spotlight',
+      fixture: { type: preset.id, position_id: null, offset_ft: 0, area: null },
+    });
+    applyFixturePreset(L, preset.id);
+    if (L.type === 'linear') {
+      // A bar needs two engine endpoints; give it a short one at its position.
+      const [x, y, z] = L.position;
+      L.endpoint_a = [x - 0.1, y, z];
+      L.endpoint_b = [x + 0.1, y, z];
+    }
+  } else {
+    L = lightFromPreset(preset);
+    L.name = uniqueName(preset.name);
+  }
   pendingAddLight = null;
   lastSelectedBeforePicker = null;
 
@@ -340,8 +389,8 @@ function onPickPreset(preset) {
     return;
   }
 
-  // Reflector (or no assets yet): instant add at default position (legacy path).
-  insertAt.parentArr.splice(insertAt.index, 0, L);
+  // Reflector, cyc bar, or no assets yet: instant add at the default position.
+  insertLight(L, insertAt);
   state.selectedId = L.id;
   tree?.render();
   refreshProps();
@@ -350,7 +399,7 @@ function onPickPreset(preset) {
 
 const onChange = () => {
   invalidatePolish();
-  syncLights(state);
+  rebuildRigTree();
   syncDraggedLights();
   if (state.sessionId) {
     handlesAPI = mountHandles(state, onHandlesChange, onCanvasSelect);
@@ -436,8 +485,11 @@ async function applyScene(scene) {
   const calRecord = mergeVenueIntoCalibration(s.calibration || null, state.venue);
   state.calibration = calRecord ? solveRecord(calRecord, state.height / state.width) : null;
   if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
+  // Fixtures follow their venue: a position edited since the last load
+  // moves the lights hung on it (spec: Venue editor).
+  if (rigMode(state)) syncAllFixtures(state.lights, state.venue, state.calibration);
 
-  tree.render();
+  tree.render();      // rig mode: regenerates the groups from the venue
   refreshProps();
 
   if (state.assetUrls) {
@@ -622,7 +674,10 @@ async function setupPolishUI() {
 }
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────
-tree = mountTree(state, onTreeSelect, onChange, onRequestAddLight);
+// Every tree render first regenerates the rig groups when in rig mode, so
+// callers never have to know which mode the scene is in.
+const treeView = mountTree(state, onTreeSelect, onChange, onRequestAddLight);
+tree = { render() { rebuildRigTree(); treeView.render(); } };
 refreshProps();
 
 document.addEventListener('keydown', (e) => {
@@ -650,6 +705,10 @@ document.addEventListener('keydown', (e) => {
       if (patch.direction) L.direction = patch.direction;
       if (patch.normal)    L.normal    = patch.normal;
       if ('target' in patch) L.target = patch.target;
+      // Spec 2: a gizmo move detaches the fixture from its hang position
+      // (Custom, coordinates kept); a re-aim drops its acting area.
+      if (patch.position || patch.position_ft) detachFixture(L);
+      if (patch.direction || patch.direction_ft || 'target' in patch || 'target_ft' in patch) detachAim(L);
       // Targeted lights derive direction from target - position; recompute after
       // any target OR position change so the beam tracks live.
       applyTargeting(L);
@@ -904,6 +963,7 @@ document.getElementById('add-light-btn').addEventListener('click', () => {
   onRequestAddLight({ parentArr: state.tree, index: state.tree.length });
 });
 document.getElementById('add-group-btn').addEventListener('click', () => {
+  if (rigMode(state)) return;          // groups follow hang positions in a calibrated scene
   const G = newGroupNode({ name: uniqueName('Group') });
   state.tree.push(G);
   state.selectedId = G.id;
@@ -940,6 +1000,7 @@ function applyCalibration(record) {
   document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
   redrawAndSave();
   handlesAPI?.reposition();   // edge arrows / hidden handles follow the calibration state
+  tree?.render();             // rig mode may have switched on or off with the venue
   if (record) syncVenueWithCalibration(record);   // async; the scene keeps its venue on Clear
 }
 
@@ -961,6 +1022,9 @@ async function crossCheckCalibration(record) {
 window.__applyCalibration = () => applyCalibration(state.calibration);
 window.__syncMetricLights = () => { if (state.calibration) migrateLightsToFeet(state.lights, state.calibration); };
 window.__redraw = () => redraw();
+// Full change path (rig re-hang, engine sync, tree/handles/3D refresh, save):
+// what the UI runs after any structural edit; for console checks and specs.
+window.__onChange = () => { onChange(); tree?.render(); refreshProps(); };
 
 // ─── Display units (ft | m) and the calibrate badge ───────────────────────
 // Units are a viewer preference: stored values stay in feet, only the props
