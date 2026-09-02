@@ -164,6 +164,18 @@ If `https://relight.<yourdomain>` does not work, walk this ladder:
   the limit and return HTTP 524.
 - Cloudflare outage takes the demo down. Rare, no remediation.
 
+## Running the Playwright suite next to a dev server
+
+`web/tests/playwright.config.js` starts its own uvicorn on port 8765 with
+`reuseExistingServer: true`. If a dev server is already listening on 8765
+(for example one started from the project root for manual checks), Playwright
+silently reuses it: the parity and calibrated-smoke specs then create their
+scenes and prepared sessions in that server's **real** `cache/scenes.db` and
+`cache/sessions/`, and the run is invalid as evidence because it did not
+exercise a fresh server. Run the suite only when nothing is listening on 8765
+(`netstat -ano | findstr :8765` must be empty), and stop any dev server on
+that port first; the demo server on 8001 is unaffected.
+
 ## Uninstall
 
 ```powershell
