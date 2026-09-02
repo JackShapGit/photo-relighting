@@ -3,6 +3,7 @@
 Date: 2026-09-01
 Status: Implemented 2026-09-01 (feat/stage-calibration)
 Roadmap position: Spec 1 of 6 (next: Fixture Table)
+Note (2026-09-02): the five-click marking UI described here was replaced by the calibration cube (see `2026-09-02-calibration-cube-design.md`); the stored calibration record format is unchanged.
 
 ## Goal
 

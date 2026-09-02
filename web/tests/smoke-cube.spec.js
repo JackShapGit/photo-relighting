@@ -8,6 +8,8 @@ import { createSceneFromFixture, PORTRAIT_A } from './helpers.js';
 // commits it; Undo returns to no calibration and the default pose; Redo
 // calibrates again; the Stage box toggle hides and shows the box. Then the
 // house box: a real ceiling drag, Apply with a ceiling-referenced pipe, toggle.
+// A second spec covers reload persistence: the latest history entry is saved
+// with the scene as calibration_undo, so one Undo still works after a reload.
 test.setTimeout(180_000);
 
 test('stage box: default pose, real drag, apply, undo, redo, toggle', async ({ page }) => {
@@ -221,6 +223,73 @@ test('stage box: default pose, real drag, apply, undo, redo, toggle', async ({ p
   // The offset resets once applyCalibration runs (after the venue write), not on the Apply click itself.
   await expect.poll(() => box3d('stage-box').then((o) => Math.abs(o?.pos[2] ?? 1)), { timeout: 15000 }).toBeLessThan(1e-6);
   await page.click('#calib-panel .cal-close');
+
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('calibration_undo survives a reload: one Undo after reload restores the previous calibration', async ({ page }) => {
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(String(e)));
+
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await createSceneFromFixture(page, { name: 'smoke-cube-reload', viewMode: '2d' });
+  const sceneId = await page.evaluate(() => window.__state.sceneId);
+  expect(await page.evaluate(() => window.__state.calibration)).toBeNull();
+  const overlay = page.locator('#cube-overlay');
+  await expect(overlay.locator('.cube-stage .cube-handle')).toHaveCount(5);
+  const defaultLipR = await page.evaluate(() => window.__calDraft().draft.marks.lipR.slice());
+
+  // Real drag of lipR, then Apply from the panel (the badge opens it on an uncalibrated scene).
+  const lipR = overlay.locator('.cube-stage .cube-handle[data-key="lipR"]');
+  const box = await lipR.boundingBox();
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  for (let i = 1; i <= 5; i++) await page.mouse.move(cx + i * 10, cy, { steps: 2 });
+  await page.mouse.up();
+  await page.click('#calibrate-btn');
+  await expect(page.locator('#calib-panel')).toBeVisible();
+  await page.click('#calib-panel .cal-apply');
+  await expect.poll(() => page.evaluate(() => window.__state.calibration?.camera?.dist_ft ?? null), { timeout: 15000 }).not.toBeNull();
+  const applied = await page.evaluate(() => ({ dist: window.__state.calibration.camera.dist_ft, hist: window.__calDraft().history.length }));
+  expect(applied.hist).toBe(1);
+
+  // The undo entry reaches the server with the scene: the previous state was uncalibrated.
+  const savedState = async () => (await (await page.request.get(`http://localhost:8765/scenes/${sceneId}`)).json()).state;
+  await expect.poll(async () => (await savedState())?.calibration_undo ? 'saved' : 'none', { timeout: 15000 }).toBe('saved');
+  expect((await savedState()).calibration_undo.calibration).toBeNull();
+
+  // Reload: the most recent scene (this one) loads with its history seeded from calibration_undo.
+  await page.reload();
+  await page.waitForFunction(
+    (id) => window.__state?.sceneId === id && !!window.__state.calibration?.camera && window.__calDraft?.().history.length === 1,
+    sceneId, { timeout: 60000 },
+  );
+  await page.waitForTimeout(1500);
+  expect(await page.evaluate(() => window.__state.calibration.camera.dist_ft)).toBeCloseTo(applied.dist, 6);
+  await expect(overlay.locator('.cube-stage .cube-handle')).toHaveCount(5);
+
+  // One Undo (the scene is in rig mode after Apply created its venue, so the
+  // badge opens the venue editor and its Calibration button opens the panel).
+  await page.click('#calibrate-btn');
+  await page.click('#ve-calibrate');
+  await expect(page.locator('#calib-panel')).toBeVisible();
+  await expect(page.locator('#calib-panel .cal-undo')).toBeEnabled();
+  await page.click('#calib-panel .cal-undo');
+  await expect.poll(() => page.evaluate(() => window.__state.calibration), { timeout: 15000 }).toBeNull();
+  const undone = await page.evaluate(() => {
+    const d = window.__calDraft();
+    return { lipR: d.draft.marks.lipR.slice(), hist: d.history.length, redo: !!d.redo, badge: document.getElementById('calibrate-btn').textContent };
+  });
+  expect(undone.lipR[0]).toBeCloseTo(defaultLipR[0], 6);   // default pose again
+  expect(undone.hist).toBe(0);
+  expect(undone.redo).toBe(true);
+  expect(undone.badge).toBe('Calibrate');
+  await expect(page.locator('#calib-panel .cal-undo')).toBeDisabled();   // only one entry survives a reload
+  await expect.poll(async () => { const st = await savedState(); return [st.calibration, st.calibration_undo]; }, { timeout: 15000 }).toEqual([null, null]);
+  await expect(page.locator('#calib-panel .cal-redo')).toBeEnabled();
 
   expect(errors, errors.join('\n')).toEqual([]);
 });

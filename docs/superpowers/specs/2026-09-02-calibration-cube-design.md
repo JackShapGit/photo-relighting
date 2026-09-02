@@ -1,7 +1,7 @@
 # Calibration Cube — Design Spec
 
 Date: 2026-09-02
-Status: Approved in discussion, awaiting user review of this document
+Status: Implemented 2026-09-02 (feat/calibration-cube)
 Roadmap position: replaces the five-click marking UI of Spec 1; lands before Spec 3 (Readouts and Measuring)
 
 ## Goal
@@ -247,6 +247,48 @@ house box.
 5. 3D wireframes + stage-box gizmo mapping; toggles in both views.
 6. Height reference in positions table and venue editor; tooltips.
 7. Smoke/E2E, docs, spec status.
+
+## Deviations (as implemented, 2026-09-02)
+
+Ruled by the lead during implementation; each is deliberate.
+
+- **House handle drags are relative to the press**, and a handle for an
+  edge that projects beyond the photo is parked 10 px inside the image edge
+  (hollow, `.is-offscreen`) so the edge stays reachable; the lines are drawn
+  where they really project. An absolute drag from a parked handle would
+  have snapped an off-image ceiling or wall to the pointer.
+- **The 3D boxes sit at the draft's offset** (the camera delta applied →
+  preview), dashed, until Apply rebuilds the frame around them; a
+  gizmo-dragged stage box therefore stays where it was dropped instead of
+  snapping to the origin on release.
+- **History snapshots carry the engine-space light fields** (`position`,
+  `target`, `direction`, `endpoint_a`, `endpoint_b`) as well as the feet
+  fields, so an Undo back to an uncalibrated state restores exact positions.
+- **"Default on" for the two toggles is a session override**: while the
+  scene is uncalibrated or the panel is open the checkbox shows on regardless
+  of the stored value; a click then hides the box for the session and is
+  stored; the stored value rules otherwise.
+- **An estimated house follows typed stage dimensions live** (`houseForDims`
+  re-derives it in the draft, and again before every venue write), so the
+  house that Apply saves is the one the overlay showed.
+- **The venue editor rejects out-of-rule house values** with the rule named
+  (floor at or below the deck, ceiling above the opening, walls at least a
+  stage width apart, depth at least a foot) and blocks Save, instead of
+  clamping silently; the calibration panel's house fields reject the same
+  way. The editor's "+ Add position" follows its own, unsaved default
+  reference select.
+- **The house colour is amber** (`--house-color: #f0a030`, both views);
+  the theme's accent is blue, so the spec's "second colour" could not be
+  another blue.
+- **Vertical gizmo sign: lifting the stage box lowers the camera** by the
+  same amount (`cameraFromGizmoDelta` subtracts `dy`), so a lift in 3D moves
+  the stage up on the photo. The box is the fixed reference; the camera is
+  what moves.
+- **Tree selection syncs the 3D selection and gizmo** (`onTreeSelect` →
+  `syncLightsToScene`), which only 2D and 3D clicks did before; needed so
+  deselecting from the tree hands the gizmo back to the stage box.
+- No wireframes are drawn in an uncalibrated scene (the 3D view is in the
+  engine frame there); the photo overlay still shows the default pose.
 
 ## Roadmap note
 
