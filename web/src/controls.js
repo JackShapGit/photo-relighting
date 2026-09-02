@@ -11,8 +11,12 @@ import { PRESETS } from './presets.js';
 import { isTargeted, targetSpawnPoint, applyTargeting } from './targeting.js';
 import { toDisplay, parseLength } from './metric/units.js';
 import { syncLightFromFeet } from './metric/light-metric.js';
-import { FIXTURE_TYPES } from './rig/presets.js';
-import { detachFixture, detachAim } from './rig/fixture-sync.js';
+import { FIXTURE_TYPES, PRESETS as FIXTURE_PRESETS } from './rig/presets.js';
+import { detachFixture, detachAim, findPosition } from './rig/fixture-sync.js';
+import { areaLabels } from './rig/geometry.js';
+import {
+  optionControl, validOffset, setFixtureType, setFixtureOption, setFixturePosition, setFixtureOffset, setFixtureArea,
+} from './rig/rig-tab.js';
 
 const SLOT_VARS = ['--slot-key', '--slot-fill', '--slot-rim'];
 
@@ -45,7 +49,7 @@ export function setGoboPresets(presets) {
   goboPresets = presets;
 }
 
-export function renderProps(state, container, redraw, onStructural) {
+export function renderProps(state, container, redraw, onStructural, onRigEdit) {
   if (state.selectedId === SCENE_ID) {
     renderSceneProps(state, container, redraw);
     return;
@@ -60,7 +64,7 @@ export function renderProps(state, container, redraw, onStructural) {
     return;
   }
   const idx = state.lights.indexOf(node);
-  renderLightProps(node, idx, container, redraw, onStructural, state);
+  renderLightProps(node, idx, container, redraw, onStructural, state, onRigEdit);
 }
 
 function renderGroupProps(G, container) {
@@ -229,7 +233,7 @@ function renderSceneProps(state, container, redraw) {
   });
 }
 
-function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {}) {
+function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {}, onRigEdit = null) {
   if (L.type === 'reflector') {
     renderReflectorProps(L, slotIdx, container, redraw);
     return;
@@ -256,16 +260,32 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
     ${L.target_ft ? `<fieldset class="metric-tgt"><legend>Target (${units})</legend>${ftFields('tgt')}
     </fieldset>` : ''}` : '';
 
+  // Rig mode (Spec 2): a fixture's type / option / position / offset / area
+  // live in a compact fieldset above the light controls, sharing the rig
+  // tab's setters so both places behave the same.
+  const rig = !!(state.venue && state.calibration?.camera && L.fixture);
+  const rigPos = rig ? findPosition(state.venue, L.fixture.position_id) : null;
+  const rigBlock = rig ? `
+    <fieldset class="rig-props"><legend>Rig</legend>
+      <label>Fixture <select class="rig-type">${FIXTURE_TYPES.map((t) => `<option value="${t.id}">${escapeHtml(t.label)}</option>`).join('')}</select></label>
+      <label class="rig-option-row"><span class="rig-option-label"></span><span class="rig-option-slot"></span></label>
+      <label>Position <select class="rig-position"><option value="">Custom</option>${state.venue.positions.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('')}</select></label>
+      ${rigPos ? `<label>${rigPos.kind === 'boom' ? 'Height' : 'Offset'} (${units}) <input class="rig-offset" type="text" inputmode="decimal" /></label>` : ''}
+      <label>Area <select class="rig-area"><option value="">—</option>${areaLabels(state.venue.grid).map((a) => `<option value="${a}">${a}</option>`).join('')}</select></label>
+    </fieldset>` : '';
+
   container.innerHTML = `
     <div class="props-header">
       <span class="slot-dot" style="background: ${slotColor(slotIdx)}"></span>
       <h2 class="props-name">${escapeHtml(L.name)}</h2>
     </div>
+    ${rigBlock}
     <label>Type
-      <select class="type">
+      <select class="type" ${rig ? 'disabled title="Set by the fixture type"' : ''}>
         <option value="directional">directional</option>
         <option value="point">point</option>
         <option value="spotlight">spotlight</option>
+        <option value="linear">linear</option>
       </select>
     </label>
     ${metric ? posBlock : '<label>Position Z <input class="position-z" type="range" min="-2" max="3" step="0.05" /></label>'}
@@ -289,6 +309,64 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
   `;
 
   const $ = (sel) => container.querySelector(sel);
+
+  if (rig) {
+    const venue = state.venue, record = state.calibration;
+    const done = () => (onRigEdit ? onRigEdit() : onStructural?.());
+    const f = L.fixture;
+    $('.rig-type').value = f.type;
+    $('.rig-type').addEventListener('change', (e) => { setFixtureType(L, e.target.value, venue, record); done(); });
+    $('.rig-position').value = f.position_id || '';
+    $('.rig-position').addEventListener('change', (e) => { setFixturePosition(L, e.target.value || null, venue, record); done(); });
+    const areaSel = $('.rig-area');
+    areaSel.value = f.area || '';
+    areaSel.disabled = (FIXTURE_PRESETS[f.type] || FIXTURE_PRESETS.other).aimed === 'none';
+    areaSel.addEventListener('change', (e) => { setFixtureArea(L, e.target.value || null, venue, record); done(); });
+    const offIn = $('.rig-offset');
+    if (offIn) {
+      offIn.value = toDisplay(f.offset_ft ?? 0, units).toFixed(1);
+      offIn.addEventListener('change', (e) => {
+        const ft = parseLength(e.target.value, units);
+        if (ft == null || !validOffset(rigPos, ft, venue)) { e.target.value = toDisplay(f.offset_ft ?? 0, units).toFixed(1); return; }
+        setFixtureOffset(L, ft, venue, record); done();
+      });
+    }
+    // Option control per type: barrel/lamp select, beam number, cyc length.
+    const ctl = optionControl(f.type);
+    const row = $('.rig-option-row');
+    if (ctl.kind === 'none') row.hidden = true;
+    else {
+      $('.rig-option-label').textContent = ctl.kind === 'length' ? `${ctl.label} (${units})` : ctl.label;
+      const slot = $('.rig-option-slot');
+      let input;
+      if (ctl.kind === 'select') {
+        input = document.createElement('select');
+        input.innerHTML = ctl.values.map((v) => `<option value="${v}">${typeof v === 'number' ? `${v}°` : v}</option>`).join('');
+        input.value = String(f[ctl.key]);
+        input.addEventListener('change', () => { setFixtureOption(L, typeof ctl.values[0] === 'number' ? Number(input.value) : input.value, venue, record); done(); });
+      } else if (ctl.kind === 'length') {
+        input = document.createElement('input');
+        input.type = 'text'; input.inputMode = 'decimal';
+        input.value = toDisplay(f.length_ft ?? 4, units).toFixed(1);
+        input.addEventListener('change', () => {
+          const ft = parseLength(input.value, units);
+          if (ft == null || ft <= 0) { input.value = toDisplay(f.length_ft ?? 4, units).toFixed(1); return; }
+          setFixtureOption(L, ft, venue, record); done();
+        });
+      } else {
+        input = document.createElement('input');
+        input.type = 'number'; input.min = ctl.min; input.max = ctl.max; input.step = ctl.step;
+        input.value = f[ctl.key];
+        input.addEventListener('change', () => {
+          const v = parseFloat(input.value);
+          if (!Number.isFinite(v) || v < ctl.min || v > ctl.max) { input.value = f[ctl.key]; return; }
+          setFixtureOption(L, v, venue, record); done();
+        });
+      }
+      input.className = 'rig-option';
+      slot.appendChild(input);
+    }
+  }
 
   $('.type').value = L.type;
   if (!metric) $('.position-z').value = L.position[2];

@@ -193,6 +193,62 @@ main {
 }
 .pane-tabs button[aria-disabled="true"]:hover { background: transparent; }
 #rig-root[hidden], #tree-root[hidden] { display: none; }
+
+/* ─── Rig tab (Spec 2): positions and fixtures tables ─────────────── */
+#rig-root { padding: 6px 8px 12px; font-size: 12px; }
+.rig-status {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 4px 2px 8px; color: var(--text-muted); font-size: 12px;
+}
+.rig-status-count { color: var(--text-primary); }
+.rig-msg { color: var(--warn, #e0a030); margin-left: 6px; }
+.rig-heading {
+  margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted);
+}
+.rig-table-wrap { overflow-x: auto; max-width: 100%; }
+.rig-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.rig-table th, .rig-table td { padding: 2px 4px; text-align: left; white-space: nowrap; vertical-align: middle; }
+.rig-table thead th {
+  position: sticky; top: 0; background: var(--bg-elevated); color: var(--text-muted);
+  font-weight: normal; font-size: 11px; border-bottom: 1px solid var(--border); z-index: 1;
+}
+.rig-table tbody tr { height: 24px; border-bottom: 1px solid transparent; }
+.rig-table tbody tr:hover { background: var(--bg-hover); }
+.rig-table tr.rig-group th {
+  padding-top: 6px; color: var(--text-muted); font-weight: normal; font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+.rig-table tr.rig-fixture { cursor: pointer; border-left: 2px solid transparent; }
+.rig-table tr.rig-fixture.selected { background: var(--bg-selected); border-left-color: var(--accent); }
+.rig-table tr.rig-fixture.disabled td:first-child { opacity: 0.55; }
+.rig-table input, .rig-table select {
+  background: transparent; border: 1px solid transparent; border-radius: 3px;
+  color: var(--text-primary); font-size: 12px; padding: 1px 3px; margin: 0;
+}
+.rig-table input.rig-num { width: 56px; text-align: right; }
+.rig-table input.rig-text { width: 88px; }
+.rig-table input[type="number"] { width: 52px; }
+.rig-table select { max-width: 110px; }
+.rig-table input:hover, .rig-table select:hover { border-color: var(--input-border, #444); }
+.rig-table input:focus, .rig-table select:focus { border-color: var(--accent, #4a7); outline: none; background: var(--bg); }
+.rig-table input.is-invalid { border-color: var(--danger, #c44); }
+.rig-muted { color: var(--text-muted); }
+.rig-count { text-align: center; color: var(--text-muted); }
+.rig-actions { display: inline-flex; gap: 2px; }
+.rig-btn {
+  font-size: 11px; padding: 1px 6px; background: transparent; border: 1px solid var(--input-border);
+  border-radius: 3px; color: var(--text-muted); cursor: pointer;
+}
+.rig-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.rig-toolbar { display: flex; gap: 6px; padding: 4px 0 2px; }
+.rig-load { display: flex; gap: 6px; align-items: center; padding: 4px 0; color: var(--text-muted); }
+
+/* Props pane: the compact Rig fieldset above the light controls. */
+.rig-props { border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px 6px; margin: 0 0 8px; }
+.rig-props legend { font-size: 11px; color: var(--text-muted); padding: 0 4px; }
+.rig-props label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; margin: 3px 0; }
+.rig-props select, .rig-props input { width: 120px; }
+.rig-props .rig-option-row[hidden] { display: none; }
 .pane-header {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);

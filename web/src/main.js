@@ -19,6 +19,7 @@ import { mergeVenueIntoCalibration } from './rig/geometry.js';
 import { rigMode, buildRigTree } from './rig/tree-mirror.js';
 import { syncRig, syncAllFixtures, detachFixture, detachAim } from './rig/fixture-sync.js';
 import { applyFixturePreset } from './rig/presets.js';
+import { mountRigTab, buildFixtureLight, nextOffset } from './rig/rig-tab.js';
 import {
   invalidatePolish,
   onPolishChange,
@@ -46,6 +47,7 @@ import { mountPlacement2D } from './placement-pane-2d.js';
 
 const state = newState();
 let tree = null;
+let rigTab = null;           // Rig tab (mounted after the tree below)
 let handlesAPI = null;
 let depthSampler = null;     // rebuilt on each scene load; used by 2D placement
 let placement = null;        // created once below
@@ -170,6 +172,7 @@ async function syncVenueWithCalibration(record) {
     }
     updateBadge();
     tree?.render();     // a venue-less scene just gained one: rig mode starts here
+    if (rigMode(state)) setLeftTab('rig');
     scheduleSave();
   } catch (e) {
     console.warn('venue sync failed', e);
@@ -247,9 +250,17 @@ const refreshProps = () => {
   if (state.selectedId === ADD_LIGHT_ID) {
     renderAddLightPicker(state, c, onPickPreset);
   } else {
-    renderProps(state, c, redrawAndSave, onChange);
+    renderProps(state, c, redrawAndSave, onChange, structuralEdit);
   }
 };
+
+// A change that can regroup the tree or alter what the tables show: sync,
+// redraw, save (onChange), then re-render the tree, the rig tab, and props.
+function structuralEdit() {
+  onChange();
+  tree?.render();
+  refreshProps();
+}
 
 function commitPlacedLight(L, insertAt) {
   insertLight(L, insertAt);
@@ -678,8 +689,41 @@ async function setupPolishUI() {
 // Every tree render first regenerates the rig groups when in rig mode, so
 // callers never have to know which mode the scene is in.
 const treeView = mountTree(state, onTreeSelect, onChange, onRequestAddLight);
-tree = { render() { rebuildRigTree(); treeView.render(); refreshLeftTabs(); } };
+tree = { render() { rebuildRigTree(); treeView.render(); rigTab?.render(); refreshLeftTabs(); } };
 refreshProps();
+
+// ─── Rig tab (Spec 2): positions and fixtures tables ─────────────────────
+rigTab = mountRigTab({
+  rootEl: document.getElementById('rig-root'),
+  getState: () => state,
+  onVenueChange: applyVenueEdit,
+  onLightsChange: structuralEdit,
+  onSelect: onCanvasSelect,
+  openVenueEditor: () => calibPanel?.open(),   // Task 8 replaces this with the venue editor
+  listVenues,
+});
+document.addEventListener('relight:units', () => rigTab?.render());
+window.__rig = { buildFixtureLight, nextOffset };   // console / spec hook (pure builders)
+
+// A rig-tab edit to the venue (positions): the live venue and its snapshot
+// change at once so fixtures re-hang immediately; the server copy follows.
+async function applyVenueEdit(venue) {
+  state.venue = venue;
+  state.venue_snapshot = venue;
+  syncAllFixtures(state.lights, state.venue, state.calibration);
+  structuralEdit();
+  updateBadge();
+  if (state.venue_id && !state.venueMissing) {
+    try {
+      const v = await updateVenue(state.venue_id, venue);
+      state.venue = v; state.venue_snapshot = v;
+    } catch (e) {
+      console.warn('venue update failed', e);
+      setStatus('Venue save failed');
+    }
+  }
+  scheduleSave();
+}
 
 // ─── Left pane: Lights | Rig tabs and the draggable divider (Spec 2) ─────
 // The Rig tab only makes sense in rig mode (calibrated scene with a venue);
