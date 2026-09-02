@@ -131,7 +131,7 @@ test('clampHouse: floor never above the deck, ceiling always above the opening, 
   assert.equal(house.estimated, true, 'input not mutated');
 });
 
-test('cameraFromGizmoDelta: dz adds to dist, dy to height, dx shifts u_c; re-solving the produced marks reproduces the camera', () => {
+test('cameraFromGizmoDelta: dz adds to dist, a lift of dy lowers the camera by dy, dx shifts u_c; re-solving the produced marks reproduces the camera', () => {
   const cam = solveCamera(record, aspect);
   const { camera, marks } = cameraFromGizmoDelta(cam, DIMS, [0, 0, 10]);
   near(camera.dist_ft, cam.dist_ft + 10);
@@ -139,8 +139,10 @@ test('cameraFromGizmoDelta: dz adds to dist, dy to height, dx shifts u_c; re-sol
   assert.ok(Math.abs(re.dist_ft - camera.dist_ft) <= camera.dist_ft * 0.005, `${re.dist_ft} vs ${camera.dist_ft}`);
   near(re.f, camera.f, 1e-6);
   const up = cameraFromGizmoDelta(cam, DIMS, [0, 2, 0]);
-  near(up.camera.height_ft, cam.height_ft + 2);
-  near(solveCamera({ ...DIMS, marks: up.marks }, aspect).height_ft, cam.height_ft + 2, 1e-6);
+  near(up.camera.height_ft, cam.height_ft - 2);
+  near(solveCamera({ ...DIMS, marks: up.marks }, aspect).height_ft, cam.height_ft - 2, 1e-6);
+  // A lifted box rises on the photo: its lip line moves up (smaller v).
+  assert.ok(up.marks.lipL[1] < record.marks.lipL[1], 'lip line moved up');
   const side = cameraFromGizmoDelta(cam, DIMS, [5, 0, 0]);
   near(side.camera.u_c, cam.u_c + 5 * cam.f / cam.dist_ft);
   near(side.marks.top[0], side.camera.u_c);

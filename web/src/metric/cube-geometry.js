@@ -205,21 +205,23 @@ export function houseWidthPatch(house, widthFt) {
 export function cameraDelta(from, to) {
   return [
     (to.u_c - from.u_c) * from.dist_ft / from.f,
-    to.height_ft - from.height_ft,
+    from.height_ft - to.height_ft,     // the box lifted by dy = the camera dy lower
     to.dist_ft - from.dist_ft,
   ];
 }
 
 /**
- * Move the camera by a 3D gizmo delta in feet: dx slides the principal
- * point (u_c += dx·f/dist), dy raises the camera, dz moves it along −Z
- * (further into the house: dist += dz). Returns the camera and its marks.
+ * Move the box by a 3D gizmo delta in feet with the camera as the thing
+ * that really moves: dx slides the principal point (u_c += dx·f/dist), a
+ * lift of dy puts the camera dy lower (so the stage rises on the photo),
+ * dz moves the box away from the camera (dist += dz). Returns the camera
+ * and its marks.
  */
 export function cameraFromGizmoDelta(cam, dims, [dx, dy, dz]) {
   const camera = {
     ...cam,
     u_c: cam.u_c + dx * cam.f / cam.dist_ft,
-    height_ft: cam.height_ft + dy,
+    height_ft: cam.height_ft - dy,
     dist_ft: Math.max(Z_CAM_MIN * 2, cam.dist_ft + dz),
   };
   camera.perspective_ratio = camera.dist_ft / (camera.dist_ft + dims.depth_ft);

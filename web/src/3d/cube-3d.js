@@ -11,7 +11,7 @@ import { stageBoxSegments, houseBoxSegments } from './cube-lines.js';
 export const STAGE_BOX_NAME = 'stage-box';
 export const HOUSE_BOX_NAME = 'house-box';
 const STAGE_COLOR = 0x4a9eff;   // --accent
-const HOUSE_COLOR = 0x58a6ff;   // --house-color
+const HOUSE_COLOR = 0xf0a030;   // --house-color (amber)
 const DASH = { dashSize: 1, gapSize: 0.6 };   // feet
 const RENDER_ORDER = 6;         // above the cloud and the deck grid, below the rig labels (10)
 

@@ -1228,7 +1228,7 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
   border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 #calib-panel .cal-house[hidden] { display: none !important; }
-#calib-panel .cal-house-title { font-weight: 600; color: #d6e8ff; }
+#calib-panel .cal-house-title { font-weight: 600; color: #ffdca8; }
 #calib-panel .cal-house-note { font-size: 11px; color: var(--text-muted); }
 #calib-panel .cal-house-msg { font-size: 11px; color: #f88; }
 @keyframes cal-reject { 0%, 100% { box-shadow: none; } 30% { box-shadow: 0 0 0 2px #f66; } }
@@ -1294,7 +1294,7 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
  * toward the camera, bar handles on the walls (drag X) and floor/ceiling
  * (drag Y). A handle for an edge beyond the photo sits at the image edge,
  * hollow, so the wall can still be grabbed. */
-#cube-overlay { --house-color: #58a6ff; }
+#cube-overlay { --house-color: #f0a030; }
 #cube-overlay .cube-house .cube-edge { stroke: var(--house-color); }
 #cube-overlay .cube-guide {
   fill: none;
@@ -1305,8 +1305,8 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 }
 #cube-overlay .cube-guide.is-dirty { stroke-dasharray: 4 4; }
 #cube-overlay .cube-house .cube-handle { fill: var(--house-color); }
-#cube-overlay .cube-house-handle.is-offscreen { fill: rgba(88, 166, 255, 0.25); stroke-dasharray: 2 2; }
-#cube-overlay .cube-house .cube-label { fill: #d6e8ff; }
+#cube-overlay .cube-house-handle.is-offscreen { fill: rgba(240, 160, 48, 0.25); stroke-dasharray: 2 2; }
+#cube-overlay .cube-house .cube-label { fill: #ffdca8; }
 /* In-place edit of an edge label: an input placed over the label. */
 .cube-label-input {
   position: absolute;
