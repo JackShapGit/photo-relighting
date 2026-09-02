@@ -1289,7 +1289,7 @@ const calibPanel = mountCalibrationPanel({
   canvasWrapEl: document.getElementById('canvas-wrap'),
   getState: () => state,
   sampleDepth: (u, v) => depthSampler?.sample(u, v) ?? NaN,
-  getVenue: () => (rigMode(state) ? state.venue : null),
+  getVenue: () => state.venue || null,   // prefill + note whenever the scene references a venue
   onApply: applyCalibration,
   onClear: () => applyCalibration(null),
   onCrossCheck: crossCheckCalibration,

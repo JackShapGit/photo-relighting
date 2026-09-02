@@ -13,14 +13,14 @@ import {
 } from './geometry.js';
 import {
   syncFixtureFromRig, attachFixture, detachFixture, findPosition,
-  enabledEmitterCount, canEnable,
+  enabledEmitterCount, tryEnable, CAP_MESSAGE,
 } from './fixture-sync.js';
 import { syncLightFromFeet } from '../metric/light-metric.js';
 import { toDisplay, parseLength } from '../metric/units.js';
 import { MAX_EMITTERS } from '../webgl/renderer.js';
 
 export const CUSTOM_ROW_ID = 'custom';
-export const CAP_MESSAGE = `${MAX_EMITTERS} lights maximum; disable one first`;
+export { CAP_MESSAGE };
 const OFFSET_LIMIT_FACTOR = 3;        // offsets beyond ±3× the stage width are rejected
 const HEIGHT_LIMIT_FACTOR = 3;        // boom heights above 3× the opening are rejected
 const ADD_STEP_FT = 2;
@@ -516,8 +516,9 @@ export function mountRigTab({ rootEl, getState, onVenueChange, onLightsChange, o
         on.type = 'checkbox'; on.checked = L.enabled !== false; on.dataset.key = `fix:${L.id}:on`;
         on.title = on.checked ? 'Disable' : 'Enable';
         on.addEventListener('change', () => {
-          if (on.checked && !canEnable(lights, L)) { on.checked = false; say(CAP_MESSAGE); return; }
-          L.enabled = on.checked; commit();
+          const r = tryEnable(lights, L, on.checked);
+          if (!r.ok) { on.checked = false; say(r.message); return; }
+          commit();
         });
         tr.appendChild(cell(on));
         const actions = el('span', 'rig-actions');

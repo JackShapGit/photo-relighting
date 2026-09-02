@@ -260,6 +260,10 @@ main {
 #calibrate-btn.is-venue-missing { color: var(--warn, #e0a030); }
 .cal-note { font-size: 11px; color: var(--text-muted); margin: 2px 0 6px; }
 
+/* Props pane: cap / validation message under the light controls. */
+.props-msg { color: var(--warn, #e0a030); font-size: 12px; margin: 4px 0; }
+.props-msg[hidden] { display: none; }
+
 /* Props pane: the compact Rig fieldset above the light controls. */
 .rig-props { border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px 6px; margin: 0 0 8px; }
 .rig-props legend { font-size: 11px; color: var(--text-muted); padding: 0 4px; }

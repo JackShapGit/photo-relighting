@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   syncFixtureFromRig, syncAllFixtures, detachFixture, detachAim, attachFixture,
-  enabledEmitterCount, canEnable, detachFromEngineEdits, syncRig,
+  enabledEmitterCount, canEnable, detachFromEngineEdits, syncRig, setLightType, tryEnable, CAP_MESSAGE,
 } from '../../../src/rig/fixture-sync.js';
 import { SYNTHETIC_VENUE } from '../../../src/rig/geometry.js';
 import { solveRecord, syncLightFromFeet } from '../../../src/metric/light-metric.js';
@@ -171,4 +171,51 @@ test('syncRig re-hangs attached lights before Spec 1 sync, so a moved pipe moves
   const C = hung(); detachFixture(C); C.position_ft = [1, 1, 1]; syncLightFromFeetForTest(C);
   syncRig([C], V2, record);
   assert.deepEqual(C.position_ft, [1, 1, 1], 'Custom is never re-hung');
+});
+
+// ─── Props-pane Type select (I2) and Enabled checkbox (I3) ────────────────
+
+test('setLightType to linear seeds engine endpoints on an uncalibrated light', () => {
+  const L = { id: 'u', type: 'spotlight', enabled: true, position: [0.4, 0.5, 1.2], direction: [0, 0, 1], target: [0.5, 0.5, 0.5] };
+  setLightType(L, 'linear', null);
+  assert.equal(L.type, 'linear');
+  vnear(L.endpoint_a, [0.3, 0.5, 1.2]); vnear(L.endpoint_b, [0.5, 0.5, 1.2]);
+  assert.equal(L.target, null, 'a bar is not aimed');
+  setLightType(L, 'spotlight', null);
+  assert.equal('endpoint_a' in L, false); assert.equal('endpoint_b' in L, false);
+});
+
+test('setLightType to linear on a calibrated Custom light makes a 4 ft bar centred on its feet position, with proxies', () => {
+  const L = spot(undefined, { position_ft: [3, 12, 4], target_ft: [0, 5, 15] });
+  syncLightFromFeetForTest(L);
+  setLightType(L, 'linear', record);
+  assert.deepEqual(L.endpoint_a_ft, [1, 12, 4]); assert.deepEqual(L.endpoint_b_ft, [5, 12, 4]);
+  assert.deepEqual(L.position_ft, [3, 12, 4]);
+  assert.ok(Array.isArray(L.endpoint_a) && Array.isArray(L.endpoint_b), 'engine proxies derived');
+  assert.equal('target_ft' in L, false);
+  setLightType(L, 'spotlight', record);
+  assert.equal('endpoint_a_ft' in L, false); assert.equal('endpoint_a' in L, false);
+  assert.deepEqual(L.position_ft, [3, 12, 4]);
+});
+
+test('setLightType to linear on a hung fixture becomes a cyc on its position (preset + linearEndpoints)', () => {
+  const L = spot({ type: 'ers', position_id: 'p_3e', offset_ft: 0, area: '5', barrel_deg: 26 });
+  syncFixtureFromRig(L, V, record);
+  setLightType(L, 'linear', record, V);
+  assert.equal(L.fixture.type, 'cyc'); assert.equal(L.fixture.length_ft, 4);
+  assert.deepEqual(L.endpoint_a_ft, [-2, 20, 22]); assert.deepEqual(L.endpoint_b_ft, [2, 20, 22]);
+  assert.equal(L.softness, 0.6);
+});
+
+test('tryEnable gates the 64-emitter cap and returns the spec message', () => {
+  const lights = Array.from({ length: 64 }, (_, i) => spot(undefined, { id: `L${i}` }));
+  const off = spot(undefined, { id: 'off', enabled: false });
+  const all = [...lights, off];
+  const refused = tryEnable(all, off, true);
+  assert.equal(refused.ok, false); assert.equal(refused.message, CAP_MESSAGE); assert.equal(off.enabled, false);
+  assert.equal(CAP_MESSAGE, '64 lights maximum; disable one first');
+  const disabled = tryEnable(all, lights[0], false);
+  assert.equal(disabled.ok, true); assert.equal(lights[0].enabled, false);
+  const ok = tryEnable(all, off, true);
+  assert.equal(ok.ok, true); assert.equal(off.enabled, true);
 });

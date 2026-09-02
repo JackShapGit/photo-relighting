@@ -8,8 +8,8 @@
 // (Custom) and keeps the coordinates; an aim edit drops the area. Editing a
 // position's numbers never touches Custom fixtures.
 import { positionToWorld, nearestOffset, areaCenter, linearEndpoints } from './geometry.js';
-import { PRESETS } from './presets.js';
-import { syncLightFromFeet, syncLightsFromEngineEdits, markCustom, engineEdits } from '../metric/light-metric.js';
+import { PRESETS, applyFixturePreset } from './presets.js';
+import { syncLightFromFeet, syncLightFromEngine, syncLightsFromEngineEdits, markCustom, engineEdits } from '../metric/light-metric.js';
 import { engineToWorld, effectiveFit } from '../metric/calibration.js';
 import { MAX_EMITTERS } from '../webgl/renderer.js';
 
@@ -110,6 +110,63 @@ export function syncRig(lights, venue, record) {
   if (venue) syncAllFixtures(lights, venue, record);
   syncLightsFromEngineEdits(lights, record);
   return detached;
+}
+
+export const CAP_MESSAGE = `${MAX_EMITTERS} lights maximum; disable one first`;
+const LINEAR_SEED_HALF_FT = 2;        // a new bar is 4 ft long
+const LINEAR_SEED_HALF_ENGINE = 0.1;  // engine-space half length when uncalibrated
+
+/**
+ * Change a light's engine type from the props pane. A linear light needs
+ * endpoints: a fixture hung on a position becomes a cyc there (preset +
+ * linearEndpoints); a Custom or uncalibrated light gets a 4 ft bar centred
+ * on its feet position (engine ±0.1 when there is no calibration). Leaving
+ * linear drops the endpoint fields. Re-derives the engine proxies.
+ */
+export function setLightType(L, type, record, venue = null) {
+  if (!L || L.type === type) return L;
+  if (type === 'linear') {
+    if (L.fixture?.position_id && findPosition(venue, L.fixture.position_id)) {
+      applyFixturePreset(L, 'cyc');
+      L.fixture.area = null;
+      syncFixtureFromRig(L, venue, record);
+      return L;
+    }
+    L.type = 'linear';
+    L.target = null;
+    delete L.target_ft;
+    if (record && L.position_ft) {
+      const [X, Y, Z] = L.position_ft;
+      L.endpoint_a_ft = [X - LINEAR_SEED_HALF_FT, Y, Z];
+      L.endpoint_b_ft = [X + LINEAR_SEED_HALF_FT, Y, Z];
+      syncLightFromFeet(L, record);
+    } else {
+      const [x, y, z] = L.position;
+      L.endpoint_a = [x - LINEAR_SEED_HALF_ENGINE, y, z];
+      L.endpoint_b = [x + LINEAR_SEED_HALF_ENGINE, y, z];
+      if (record) syncLightFromEngine(L, record);
+    }
+    return L;
+  }
+  L.type = type;
+  for (const k of ['endpoint_a_ft', 'endpoint_b_ft', 'endpoint_a', 'endpoint_b']) delete L[k];
+  if (record) {
+    if (L.position_ft) { delete L.direction_ft; syncLightFromFeet(L, record); }
+    else syncLightFromEngine(L, record);
+  }
+  return L;
+}
+
+/**
+ * Turn a light on or off, refusing the 65th enabled emitter. Shared by the
+ * Rig tab's checkbox and the props pane so both show the same message.
+ * @returns {{ ok: boolean, message?: string }}
+ */
+export function tryEnable(lights, L, on) {
+  if (!on) { L.enabled = false; return { ok: true }; }
+  if (!canEnable(lights, L)) return { ok: false, message: CAP_MESSAGE };
+  L.enabled = true;
+  return { ok: true };
 }
 
 export function enabledEmitterCount(lights) {

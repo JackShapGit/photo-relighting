@@ -15,17 +15,24 @@ export function positionGroupId(positionId) { return `pos:${positionId}`; }
 /**
  * @param {object[]} lights   flat light list (state.lights)
  * @param {object} venue      the scene's venue (positions in display order)
- * @param {object[]} [prevTree] previous tree, to carry collapsed state by group id
+ * @param {object[]} [prevTree] previous tree: group nodes with the same id are
+ *   reused (name/children/enabled updated in place, collapsed kept), so DOM
+ *   handlers bound to a group object stay valid across regenerations.
  */
 export function buildRigTree(lights, venue, prevTree = null) {
-  const collapsed = new Map();
-  for (const n of prevTree || []) if (n.kind === 'group') collapsed.set(n.id, !!n.collapsed);
-  const group = (id, name, children) => ({
-    kind: 'group', id, name,
-    enabled: children.every((c) => c.enabled !== false),   // derived, never persisted as truth
-    collapsed: collapsed.get(id) || false,
-    children,
-  });
+  const prev = new Map();
+  for (const n of prevTree || []) if (n.kind === 'group') prev.set(n.id, n);
+  const group = (id, name, children) => {
+    const enabled = children.every((c) => c.enabled !== false);   // derived, never persisted as truth
+    const node = prev.get(id);
+    if (node) {
+      node.name = name;
+      node.children = children;
+      node.enabled = enabled;
+      return node;
+    }
+    return { kind: 'group', id, name, enabled, collapsed: false, children };
+  };
   const all = lights || [];
   const emitters = all.filter((L) => L.type !== 'reflector');
   const reflectors = all.filter((L) => L.type === 'reflector');

@@ -44,3 +44,24 @@ test('collapsed state carries over from the previous tree by group id', () => {
   assert.equal(second.find((n) => n.id === 'pos:p_1e').collapsed, true);
   assert.equal(second.find((n) => n.id === 'pos:p_2e').collapsed, false);
 });
+
+test('buildRigTree reuses the group objects across regenerations (DOM handlers stay bound)', () => {
+  const a = light('a', 'p_1e'), b = light('b', null);
+  const first = buildRigTree([a, b], V);
+  const g1e = first.find((n) => n.id === 'pos:p_1e'), custom = first.find((n) => n.id === CUSTOM_GROUP_ID);
+  g1e.collapsed = true;
+  const c = light('c', 'p_1e');
+  const second = buildRigTree([a, b, c], V, first);
+  assert.equal(second.find((n) => n.id === 'pos:p_1e'), g1e, 'same group object');
+  assert.equal(second.find((n) => n.id === CUSTOM_GROUP_ID), custom);
+  assert.deepEqual(g1e.children, [a, c], 'children updated in place');
+  assert.equal(g1e.collapsed, true, 'collapse flag survives');
+  const renamed = { ...V, positions: V.positions.map((p) => (p.id === 'p_1e' ? { ...p, name: 'First' } : p)) };
+  const third = buildRigTree([a, b, c], renamed, second);
+  assert.equal(third.find((n) => n.id === 'pos:p_1e'), g1e);
+  assert.equal(g1e.name, 'First', 'name updated in place');
+  c.enabled = false;
+  buildRigTree([a, b, c], renamed, third);
+  assert.equal(g1e.enabled, false, 'enabled re-derived in place');
+  assert.ok(!buildRigTree([a, b, c], { ...V, positions: V.positions.slice(1) }, third).some((n) => n.id === 'pos:p_foh'), 'a removed position drops its group');
+});

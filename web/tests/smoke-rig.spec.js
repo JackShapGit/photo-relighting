@@ -126,5 +126,16 @@ test('rig tab: venue positions, add fixture, 3D overlay, 64-light cap', async ({
   await expect(page.locator('#rig-root .rig-msg')).toHaveText('64 lights maximum; disable one first');
   expect(await page.evaluate(() => window.__state.lights.filter((l) => l.type !== 'reflector' && l.enabled !== false).length)).toBe(64);
 
+  // The props pane shares the gate: select the disabled light, click its
+  // Enabled checkbox → refused with the same message.
+  // Row click = anywhere that is not a control: the cell padding next to the offset input.
+  await page.locator(`#rig-root tr[data-id="${offId}"] td:nth-child(5)`).click({ position: { x: 2, y: 3 } });
+  await expect(page.locator('#props-pane .props-name')).toHaveText('Cap-65');
+  const propsBox = page.locator('#props-pane .enabled');
+  await propsBox.click();
+  await expect(propsBox).not.toBeChecked();
+  await expect(page.locator('#props-pane .props-msg')).toHaveText('64 lights maximum; disable one first');
+  expect(await page.evaluate(() => window.__state.lights.filter((l) => l.type !== 'reflector' && l.enabled !== false).length)).toBe(64);
+
   expect(errors, errors.join('\n')).toEqual([]);
 });

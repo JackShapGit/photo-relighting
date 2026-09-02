@@ -12,7 +12,7 @@ import { isTargeted, targetSpawnPoint, applyTargeting } from './targeting.js';
 import { toDisplay, parseLength } from './metric/units.js';
 import { syncLightFromFeet } from './metric/light-metric.js';
 import { FIXTURE_TYPES, PRESETS as FIXTURE_PRESETS } from './rig/presets.js';
-import { detachFixture, detachAim, findPosition } from './rig/fixture-sync.js';
+import { detachFixture, detachAim, findPosition, setLightType, tryEnable } from './rig/fixture-sync.js';
 import { areaLabels } from './rig/geometry.js';
 import {
   optionControl, validOffset, setFixtureType, setFixtureOption, setFixturePosition, setFixtureOffset, setFixtureArea,
@@ -306,6 +306,7 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
       </select>
     </label>
     <label class="checkbox-row"><input type="checkbox" class="enabled" /> enabled</label>
+    <div class="props-msg" hidden></div>
   `;
 
   const $ = (sel) => container.querySelector(sel);
@@ -389,7 +390,14 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
   const bind = (sel, fn) =>
     $(sel).addEventListener('input', async (e) => { await fn(e.target); redraw(); });
 
-  bind('.type', (t) => { L.type = t.value; });
+  $('.type').addEventListener('change', (e) => {
+    // A linear light needs endpoints (the server rejects one without); the
+    // shared setter seeds them and re-derives the proxies. Structural: the
+    // 3D primitive and the handles change shape.
+    setLightType(L, e.target.value, state.calibration || null, state.venue || null);
+    if (onStructural) onStructural(); else redraw();
+    renderLightProps(L, slotIdx, container, redraw, onStructural, state, onRigEdit);
+  });
   if (!metric) bind('.position-z', (t) => { L.position[2] = parseFloat(t.value); });
   bind('.direction-z', (t) => { L.direction[2] = parseFloat(t.value); });
 
@@ -445,7 +453,14 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
   bind('.softness', (t) => { L.softness = parseFloat(t.value); });
   bind('.falloff', (t) => { L.falloff = parseFloat(t.value); });
   bind('.affects', (t) => { L.affects = t.value; });
-  bind('.enabled', (t) => { L.enabled = t.checked; });
+  $('.enabled').addEventListener('change', (e) => {
+    // Same gate and message as the Rig tab: at most 64 emitters may be on.
+    const r = tryEnable(state.lights || [], L, e.target.checked);
+    const msg = $('.props-msg');
+    if (!r.ok) { e.target.checked = false; msg.hidden = false; msg.textContent = r.message; return; }
+    msg.hidden = true; msg.textContent = '';
+    if (onStructural) onStructural(); else redraw();   // the tree row and the rig table follow
+  });
   bind('.gobo', async (t) => {
     if (t.value) {
       await ensureGoboTexture(t.value);

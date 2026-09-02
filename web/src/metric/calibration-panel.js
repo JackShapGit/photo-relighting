@@ -16,6 +16,33 @@ const crossCheckMessage = (pct) =>
 const isTextField = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
 
 /**
+ * Dimensions to show when the panel opens: the calibration record's when it
+ * has them, else the scene's venue's (Spec 2: dimensions belong to the
+ * venue), else blanks. `source` says which.
+ */
+export function panelDims(record, venue) {
+  if (record && Number.isFinite(record.width_ft)) {
+    return { width_ft: record.width_ft, height_ft: record.height_ft, depth_ft: record.depth_ft, source: 'record' };
+  }
+  if (venue && Number.isFinite(venue.width_ft)) {
+    return { width_ft: venue.width_ft, height_ft: venue.height_ft, depth_ft: venue.depth_ft, source: 'venue' };
+  }
+  return { width_ft: null, height_ft: null, depth_ft: null, source: null };
+}
+
+/**
+ * A dimension field back to feet. While the field still shows exactly what
+ * the panel prefilled, the exact prefilled value is used (so a venue's
+ * 40.25 ft shown as "40.3" is not written back as 40.3); an edit is parsed
+ * in the panel's unit. NaN when unparseable.
+ */
+export function readDim(text, shown, exact, units) {
+  if (exact != null && text === shown) return exact;
+  const v = parseFloat(text);
+  return Number.isFinite(v) ? fromDisplay(v, units) : NaN;
+}
+
+/**
  * @param {object} o
  * @param {HTMLElement} o.panelEl       #calib-panel (inside #canvas-wrap)
  * @param {HTMLElement} o.overlayEl     #calib-overlay (inside #canvas-wrap, inset 0)
@@ -73,9 +100,14 @@ export function mountCalibrationPanel({
       b.setAttribute('aria-pressed', b.dataset.unit === units ? 'true' : 'false');
     }
     if (convert && prev !== units) {
+      const keys = { [wIn.className]: 'width_ft', [hIn.className]: 'height_ft', [dIn.className]: 'depth_ft' };
       for (const el of [wIn, hIn, dIn]) {
+        const key = keys[el.className];
+        const untouched = el.value === shown[key] && prefill[key] != null;
         const v = parseFloat(el.value);
-        if (Number.isFinite(v)) el.value = toDisplay(fromDisplay(v, prev), units).toFixed(1);
+        if (untouched) el.value = toDisplay(prefill[key], units).toFixed(1);       // exact, not re-rounded
+        else if (Number.isFinite(v)) el.value = toDisplay(fromDisplay(v, prev), units).toFixed(1);
+        if (untouched) shown[key] = el.value;
       }
     }
   }
@@ -213,15 +245,26 @@ export function mountCalibrationPanel({
   markBtn.addEventListener('click', () => (markingActive ? exitMarking() : startMarking()));
 
   // ── open / close / apply / clear ──
+  // What the dimension fields were prefilled with (exact feet and the shown
+  // text), so an untouched field applies the exact value.
+  let prefill = { width_ft: null, height_ft: null, depth_ft: null };
+  let shown = { width_ft: '', height_ft: '', depth_ft: '' };
   function open() {
     const st = getState();
     const rec = st.calibration;
     setUnits(rec?.units || st.units || 'ft', false);
-    const fill = (el, ft) => { el.value = ft != null ? toDisplay(ft, units).toFixed(1) : ''; };
-    fill(wIn, rec?.width_ft); fill(hIn, rec?.height_ft); fill(dIn, rec?.depth_ft);
-    // Spec 2: in a calibrated scene the dimensions are the venue's (shared by
-    // every scene that uses it); Apply writes them through to the venue.
+    // Spec 2: the dimensions belong to the scene's venue (shared by every
+    // scene that uses it): prefill from it before the first Apply, and Apply
+    // writes through only what the user actually changed.
     const venue = typeof getVenue === 'function' ? getVenue() : null;
+    const dims = panelDims(rec, venue);
+    prefill = { width_ft: dims.width_ft, height_ft: dims.height_ft, depth_ft: dims.depth_ft };
+    const fill = (el, key) => {
+      const ft = prefill[key];
+      el.value = ft != null ? toDisplay(ft, units).toFixed(1) : '';
+      shown[key] = el.value;
+    };
+    fill(wIn, 'width_ft'); fill(hIn, 'height_ft'); fill(dIn, 'depth_ft');
     const noteEl = $('.cal-note');
     noteEl.hidden = !venue;
     noteEl.textContent = venue ? `Dimensions belong to venue ${venue.name} (shared by its scenes)` : '';
@@ -239,8 +282,11 @@ export function mountCalibrationPanel({
     panelEl.hidden = true;
   }
   function readDims() {
-    const num = (el) => { const v = parseFloat(el.value); return Number.isFinite(v) ? fromDisplay(v, units) : NaN; };
-    return { width_ft: num(wIn), height_ft: num(hIn), depth_ft: num(dIn) };
+    return {
+      width_ft: readDim(wIn.value, shown.width_ft, prefill.width_ft, units),
+      height_ft: readDim(hIn.value, shown.height_ft, prefill.height_ft, units),
+      depth_ft: readDim(dIn.value, shown.depth_ft, prefill.depth_ft, units),
+    };
   }
   function apply() {
     const dims = readDims();
