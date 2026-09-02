@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from relighting_engine.metric.calibration import (
-    Calibration, DepthFit, depth_to_zcam, engine_dir_to_world, falloff_to_metric,
-    pixel_to_world, solve_camera, world_to_engine, world_to_pixel,
+    Calibration, DepthFit, LinearFit, depth_to_zcam, effective_fit, engine_dir_to_world, engine_to_world,
+    falloff_to_metric, pixel_to_world, solve_camera, world_to_engine, world_to_pixel, zcam_to_depth,
 )
 
 ASPECT = 0.75
@@ -95,3 +95,20 @@ def test_calibration_from_dict_and_falloff():
     assert falloff_to_metric(1.0, cal.width_ft) == pytest.approx(1 / 1600)
     no_fit = Calibration.from_dict({**RECORD, "depth_fit": None}, ASPECT)
     assert no_fit.fit is None
+
+
+# ── No depth fit: linear fallback mirrors web/src/metric/calibration.js effectiveFit ──
+
+def test_effective_fit_and_linear_depth_mapping():
+    cal = Calibration.from_dict({**RECORD, "depth_fit": None}, ASPECT)
+    fit = effective_fit(cal)
+    assert isinstance(fit, LinearFit)
+    assert depth_to_zcam(0.0, fit) == pytest.approx(cal.camera.dist_ft)
+    assert depth_to_zcam(1.0, fit) == pytest.approx(cal.camera.dist_ft + 30)
+    assert zcam_to_depth(depth_to_zcam(0.37, fit), fit) == pytest.approx(0.37)
+    fitted = Calibration.from_dict(RECORD, ASPECT)
+    assert effective_fit(fitted) is fitted.fit
+    e = world_to_engine((5.0, 4.0, 10.0), cal.camera, fit)
+    assert e[2] == pytest.approx(1 - 10 / 30)
+    back = engine_to_world(e, cal.camera, fit)
+    assert back == pytest.approx((5.0, 4.0, 10.0), abs=1e-6)

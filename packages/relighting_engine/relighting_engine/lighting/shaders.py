@@ -29,7 +29,8 @@ from relighting_engine.lighting.gobo import project_uv
 from relighting_engine.lighting.models import Light
 from relighting_engine.lighting.reflectors import compute_reflector_emission
 from relighting_engine.metric.calibration import (
-    Calibration, depth_to_zcam, engine_dir_to_world, falloff_to_metric, pixel_to_world, world_to_engine,
+    Calibration, depth_to_zcam, effective_fit, engine_dir_to_world, engine_to_world, falloff_to_metric,
+    pixel_to_world, world_to_engine,
 )
 
 
@@ -59,8 +60,16 @@ def _make_metric_pos(h: int, w: int, depth: torch.Tensor, cal: Calibration) -> t
 
 
 def _metric_light_vectors(L: Light, cal: Calibration):
-    """Lighting-space (feet) position/direction plus the engine-space shadow proxy."""
-    pos_ft = L.position_ft if L.position_ft is not None else (0.0, 0.0, -cal.camera.dist_ft)
+    """Lighting-space (feet) position/direction plus the engine-space shadow proxy.
+
+    Mirrors the client's sync helper: a light without ``position_ft`` is
+    derived from its engine position through engine_to_world (spec §Error
+    handling), and the proxy always exists in front of the camera, using the
+    linear depth rule when the calibration has no depth fit.
+    """
+    fit = effective_fit(cal)
+    pos_ft = (L.position_ft if L.position_ft is not None
+              else engine_to_world(L.position, cal.camera, fit))
     if L.target_ft is not None:
         d = np.array(L.target_ft, dtype=np.float64) - np.array(pos_ft, dtype=np.float64)
         n = np.linalg.norm(d)
@@ -69,7 +78,7 @@ def _metric_light_vectors(L: Light, cal: Calibration):
         dir_ft = L.direction_ft
     else:
         dir_ft = engine_dir_to_world(L.direction)
-    proxy = world_to_engine(pos_ft, cal.camera, cal.fit) if cal.fit is not None else None
+    proxy = world_to_engine(pos_ft, cal.camera, fit)
     return pos_ft, dir_ft, proxy
 
 

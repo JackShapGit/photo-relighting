@@ -33,6 +33,15 @@ class DepthFit:
 
 
 @dataclass(frozen=True)
+class LinearFit:
+    """No-fit fallback (spec §Error handling): zCam = dist_ft + d·depth_ft.
+    Mirrors ``effectiveFit`` in web/src/metric/calibration.js and the
+    shader's ``u_fit.z = 0`` rule."""
+    dist_ft: float
+    depth_ft: float
+
+
+@dataclass(frozen=True)
 class Calibration:
     width_ft: float
     height_ft: float
@@ -68,13 +77,28 @@ def solve_camera(record: dict[str, Any], aspect: float) -> CameraModel:
                        va_h=va_h, k_y=k_y, aspect=aspect)
 
 
-def depth_to_zcam(d, fit: DepthFit):
-    inv = np.maximum(fit.a * np.asarray(d, dtype=np.float64) + fit.b, 1.0 / Z_CAM_MAX)
-    return np.clip(1.0 / inv, Z_CAM_MIN, Z_CAM_MAX)
+def effective_fit(cal: "Calibration") -> DepthFit | LinearFit:
+    """The depth mapping a calibration actually uses: its fitted inverse-depth
+    line, or the linear fallback when fitDepth found none."""
+    if cal.fit is not None:
+        return cal.fit
+    return LinearFit(dist_ft=cal.camera.dist_ft, depth_ft=cal.depth_ft)
 
 
-def zcam_to_depth(zcam, fit: DepthFit):
-    return (1.0 / np.asarray(zcam, dtype=np.float64) - fit.b) / fit.a
+def depth_to_zcam(d, fit: DepthFit | LinearFit):
+    d = np.asarray(d, dtype=np.float64)
+    if isinstance(fit, LinearFit):
+        z = fit.dist_ft + d * fit.depth_ft
+    else:
+        z = 1.0 / np.maximum(fit.a * d + fit.b, 1.0 / Z_CAM_MAX)
+    return np.clip(z, Z_CAM_MIN, Z_CAM_MAX)
+
+
+def zcam_to_depth(zcam, fit: DepthFit | LinearFit):
+    zcam = np.asarray(zcam, dtype=np.float64)
+    if isinstance(fit, LinearFit):
+        return (zcam - fit.dist_ft) / fit.depth_ft
+    return (1.0 / zcam - fit.b) / fit.a
 
 
 def pixel_to_world(u, v, zcam, cam: CameraModel):
@@ -96,7 +120,7 @@ def world_to_pixel(xyz, cam: CameraModel):
     return (u, va / cam.aspect, zcam)
 
 
-def world_to_engine(xyz, cam: CameraModel, fit: DepthFit):
+def world_to_engine(xyz, cam: CameraModel, fit: DepthFit | LinearFit):
     p = world_to_pixel(xyz, cam)
     if p is None:
         return None
@@ -104,7 +128,7 @@ def world_to_engine(xyz, cam: CameraModel, fit: DepthFit):
     return (u, v, 1.0 - float(zcam_to_depth(zcam, fit)))
 
 
-def engine_to_world(xyz, cam: CameraModel, fit: DepthFit):
+def engine_to_world(xyz, cam: CameraModel, fit: DepthFit | LinearFit):
     x, y, z = (float(c) for c in xyz)
     zcam = float(depth_to_zcam(1.0 - z, fit))
     X, Y, Z = pixel_to_world(x, y, zcam, cam)

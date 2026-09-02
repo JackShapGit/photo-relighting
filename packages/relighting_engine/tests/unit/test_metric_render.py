@@ -60,3 +60,44 @@ def test_metric_falloff_uses_feet():
     a = shaders.render(_prepared(), [near], ambient=0.0, device="cpu", calibration=cal).max()
     b = shaders.render(_prepared(), [far], ambient=0.0, device="cpu", calibration=cal).max()
     assert a > b
+
+
+# ── Final-review fixes: fallbacks must match the client ──
+
+def test_missing_position_ft_is_derived_from_engine_position():
+    from relighting_engine.metric.calibration import effective_fit, engine_to_world
+    for rec in (RECORD, {**RECORD, "depth_fit": None}):
+        cal = Calibration.from_dict(rec, ASPECT)
+        L = Light(type="point", position=(0.5, 0.6, 0.8), intensity=1.0)
+        pos_ft, _dir, proxy = shaders._metric_light_vectors(L, cal)
+        assert pos_ft == pytest.approx(engine_to_world(L.position, cal.camera, effective_fit(cal)))
+        assert proxy is not None
+        assert proxy == pytest.approx(L.position, abs=1e-6)
+
+
+def test_no_fit_shadow_proxy_uses_the_linear_rule():
+    from relighting_engine.metric.calibration import world_to_pixel
+    cal = Calibration.from_dict({**RECORD, "depth_fit": None}, ASPECT)
+    L = Light(type="spotlight", position=(0.5, 0.5, 0.5), intensity=1.0, position_ft=(5.0, 4.0, 10.0))
+    _pos, _dir, proxy = shaders._metric_light_vectors(L, cal)
+    assert proxy is not None
+    u, v, zc = world_to_pixel((5.0, 4.0, 10.0), cal.camera)
+    assert proxy == pytest.approx((u, v, 1.0 - (zc - cal.camera.dist_ft) / 30.0))
+
+
+def test_metric_shadow_marching_follows_the_engine_direction_field(monkeypatch):
+    """Shader and Python march shadows along the same vector: the engine-space
+    `direction` the client sends (kept equal to direction_eng by the client)."""
+    seen = {}
+    real = shaders._shadow_factor
+
+    def spy(P, depth, L_vec_eng, *a, **k):
+        seen["vec"] = L_vec_eng[0, 0].tolist()
+        return real(P, depth, L_vec_eng, *a, **k)
+
+    monkeypatch.setattr(shaders, "_shadow_factor", spy)
+    cal = Calibration.from_dict(RECORD, ASPECT)
+    # Deliberately inconsistent fields: the marching vector must come from `direction`.
+    L = Light(type="directional", direction=(0.6, 0.0, -0.8), direction_ft=(0.0, 0.0, 1.0), intensity=1.0)
+    shaders.render(_prepared(), [L], ambient=0.0, device="cpu", calibration=cal, shadow_style="heightfield")
+    assert seen["vec"] == pytest.approx([-0.6, 0.0, 0.8], abs=1e-6)
