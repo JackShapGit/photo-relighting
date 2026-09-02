@@ -160,15 +160,41 @@ house box.
   fields, five house fields, a height-reference default dropdown, Apply,
   Clear, and the warnings. "Mark on photo" and the marker sequence are
   removed; `marking.js` and its tests are deleted.
-- Live vs. committed: dragging updates `state.calibration.marks`, re-solves
-  into a **preview** camera used by both overlays and the 3D wireframes, and
-  updates the panel's numbers/warnings. Fixtures, the point cloud, the stage
-  grid, and the saved record change only on Apply (as today). Clear removes
-  the calibration and shows the default-pose cube again.
+- Live vs. committed: dragging updates a **draft** (marks, stage dims,
+  house values), re-solves into a preview camera used by both overlays and
+  the 3D wireframes, and updates the panel's numbers/warnings. Fixtures, the
+  point cloud, the stage grid, the venue, and the saved record change only on
+  Apply. Clear removes the calibration and shows the default-pose cube again.
+- Unapplied state is unmissable: while the draft differs from the applied
+  record, the Apply button pulses (`.is-dirty`), the panel shows an
+  "unapplied changes" line, the badge shows a dot, and the wireframes draw
+  dashed. Leaving the scene or reloading with unapplied changes discards
+  them (the draft is not persisted).
+- **Revert** (button beside Apply, enabled only when dirty) discards the
+  draft and snaps both boxes back to the last applied pose.
+- **Undo calibration** (button in the panel, enabled when history exists)
+  undoes the last Apply: it restores the previous calibration record, the
+  previous venue values (dimensions and house), and every fixture's feet
+  position/target as they were before that Apply, then re-applies that state
+  (re-solve, re-hang, rebuild). History is a per-scene stack of up to 10
+  entries kept in memory for the session; the most recent entry is also
+  persisted in scene state as `calibration_undo` so one undo survives a
+  reload. **Redo** re-applies the undone entry (single level, in-session).
 - Positions table (Rig tab) and venue editor: a reference dropdown
   (`deck | house floor | ceiling`) beside the trim/height number; the row
   also shows the two derived readings in a tooltip ("12.0 ft above house
   floor · 4.0 ft below ceiling").
+
+## Apply / Revert / Undo semantics
+
+| Action | Effect on draft | Effect on applied state | History |
+|---|---|---|---|
+| Drag / type | changes draft; preview only | none | none |
+| Apply | draft becomes applied | re-solve, venue save, fixtures re-hang, cloud rebuild, scene save | pushes the previous applied state |
+| Revert | draft := applied | none | none |
+| Undo | draft := restored | previous applied state re-applied | pops; pushes onto the single redo slot |
+| Redo | draft := restored | undone state re-applied | clears the redo slot, pushes to history |
+| Clear | draft := default pose | calibration removed (as today) | pushes the previous applied state, so Clear is undoable |
 
 ## Error handling
 
@@ -190,7 +216,8 @@ house box.
 
 ## Testing
 
-- Unit: handle ↔ marks mapping (drag top handle writes `top` at `u_c`);
+- Unit: draft/applied/history reducer (pure: apply, revert, undo, redo,
+  clear; cap 10; redo slot cleared by a new Apply); handle ↔ marks mapping (drag top handle writes `top` at `u_c`);
   default pose from the guessed camera produces valid marks for 4:3 and 16:9
   images; house pixel ↔ feet round trip; height-ref conversions (all three
   modes, both directions) and recompute-on-house-change; default house
@@ -212,8 +239,10 @@ house box.
    camera↔marks), venue house defaults. Tests.
 2. Venue/position schema additions (API + client), house defaults on load,
    recompute-on-save. Tests.
-3. Photo overlay for the stage box with live preview solve; panel rewrite;
-   delete marking flow. Playwright drag test.
+3. Photo overlay for the stage box with live preview solve; panel rewrite
+   with draft/applied state, dirty indicator, Revert, Undo/Redo history
+   (pure reducer + persistence of `calibration_undo`); delete marking flow.
+   Playwright drag + apply + undo test.
 4. House box overlay + typed fields + clamps. Playwright drag test.
 5. 3D wireframes + stage-box gizmo mapping; toggles in both views.
 6. Height reference in positions table and venue editor; tooltips.
