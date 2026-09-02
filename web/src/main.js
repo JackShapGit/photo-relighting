@@ -7,7 +7,7 @@ import { createPlacement } from './placement.js';
 import { createDepthSampler } from './depth-sampler.js';
 import {
   loadScene3D, mount3D, notifyPlacementPhase, refreshPointCloudColor, syncLightsToScene,
-  setCalibration3D, setUnits3D, frameStage3D, setVenue3D,
+  setCalibration3D, setUnits3D, frameStage3D, setVenue3D, setCubes3D, attachStageBoxGizmo, detachStageBoxGizmo,
 } from './3d/index.js';
 import { mountAreasOverlay } from './areas-overlay-2d.js';
 import {
@@ -50,6 +50,7 @@ import { mountCubeOverlay } from './metric/cube-overlay-2d.js';
 import { createDraftState, reduce as reduceDraft, serializeUndo, hydrateUndo } from './metric/calibration-draft.js';
 import {
   guessCamera, marksFromCamera, clampStageDrag, applyHandleDrag, clampHouse, houseForDims, houseDragPatch, houseWidthPatch,
+  cameraFromGizmoDelta, cameraDelta,
 } from './metric/cube-geometry.js';
 import { solveCamera, validateMarks } from './metric/calibration.js';
 import { mountPlacement2D } from './placement-pane-2d.js';
@@ -459,6 +460,7 @@ const onChange = () => {
 const onTreeSelect = () => {
   refreshProps();
   handlesAPI?.reposition();
+  syncLightsToScene(state.lights, state.selectedId);   // 3D outline + gizmo follow the tree selection too
   scheduleSave();
 };
 
@@ -1401,6 +1403,37 @@ function refreshCalibrationUI() {
   cubeOverlay?.render();
   calibPanel?.render();
   updateBadge();
+  syncCubes3D();
+}
+
+// ── 3D: wireframes for both boxes and the stage-box gizmo (spec §3D) ──
+// The boxes live in the feet frame at the draft's pose relative to the
+// applied calibration (the camera delta applied → preview), dashed while
+// dirty. While the panel is open the translate gizmo sits on the stage box;
+// a drag moves the camera through cameraFromGizmoDelta and rewrites the
+// marks, so the record stays the single source of truth.
+let boxDragBase = null;   // { cam, dims } when the gizmo drag started
+function syncCubes3D() {
+  const d = state.cal_draft?.draft;
+  const preview = d?.marks ? previewCamera() : null;
+  const applied = state.calibration?.camera || null;
+  const offset_ft = preview && applied ? cameraDelta(applied, preview) : [0, 0, 0];
+  setCubes3D(d?.dims ? { dims: d.dims, house: d.house, shown: boxesShown(), dirty: !!state.cal_draft?.dirty, offset_ft } : null);
+  if (calibPanel?.isOpen() && state.calibration) {
+    attachStageBoxGizmo({ onStart: onStageBoxStart, onDelta: onStageBoxDelta, onEnd: () => { boxDragBase = null; } });
+  } else {
+    detachStageBoxGizmo();
+  }
+}
+function onStageBoxStart() {
+  const d = state.cal_draft?.draft;
+  boxDragBase = d?.dims ? { cam: previewCamera(), dims: { ...d.dims } } : null;
+}
+function onStageBoxDelta(delta) {          // world feet since the press
+  if (!boxDragBase?.cam) return;
+  const { marks } = cameraFromGizmoDelta(boxDragBase.cam, boxDragBase.dims, delta);
+  if (!validateMarks({ ...boxDragBase.dims, marks }).ok) return;   // dragged too far: keep the last valid pose
+  dispatchDraft({ type: 'edit', patch: { marks } });
 }
 
 // Preview camera: the draft's marks and dims solved once per change.
@@ -1446,7 +1479,7 @@ for (const [kind, el, key] of BOX_TOGGLES) {
   el?.addEventListener('change', () => {
     boxOverride[kind] = el.checked;
     try { localStorage.setItem(key, el.checked ? '1' : '0'); } catch {}
-    cubeOverlay?.render();
+    refreshCalibrationUI();   // both views follow the toggle
   });
 }
 

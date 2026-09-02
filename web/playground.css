@@ -1214,6 +1214,7 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 #calib-panel[hidden] { display: none !important; }
 #calib-panel h3 { margin: 0 0 4px; font-size: 13px; }
 #calib-panel .cal-help { margin: 0 0 4px; color: var(--text-muted); }
+#calib-panel .cal-camera { font-size: 11px; color: var(--text-muted); }
 #calib-panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #calib-panel input[type="number"] { width: 90px; }
 #calib-panel select { max-width: 110px; }

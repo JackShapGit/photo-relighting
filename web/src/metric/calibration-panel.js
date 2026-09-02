@@ -10,7 +10,7 @@
 // calibration-draft.js, and main.js owns both plus the preview camera.
 import { validateMarks, fitDepth } from './calibration.js';
 import { clampHouse } from './cube-geometry.js';
-import { toDisplay, fromDisplay } from './units.js';
+import { toDisplay, fromDisplay, formatLength } from './units.js';
 
 const CROSS_CHECK_WARN_PCT = 20;
 const HEIGHT_WARN_PCT = 10;
@@ -102,6 +102,7 @@ export function mountCalibrationPanel({
   panelEl.innerHTML = `
     <h3>Stage calibration</h3>
     <p class="cal-help">Drag the box's corners on the photo to fit the stage; type its real size here.</p>
+    <div class="cal-camera" hidden></div>
     <label>Width <input class="cal-w" type="number" step="0.1" min="0" /></label>
     <label>Height <input class="cal-h" type="number" step="0.1" min="0" /></label>
     <label>Depth <input class="cal-d" type="number" step="0.1" min="0" /></label>
@@ -290,6 +291,9 @@ export function mountCalibrationPanel({
     $('.cal-href').value = defaultHeightRef;
 
     const cam = d?.marks ? getPreviewCamera?.() : null;
+    const camEl = $('.cal-camera');
+    camEl.hidden = !cam;
+    if (cam) camEl.textContent = `Camera ${formatLength(cam.dist_ft, units)} from the lip · ${formatLength(cam.height_ft, units)} above the deck`;
     let fit;
     if (cam && d && typeof sampleDepth === 'function') fit = fitDepth(recordFromDraft(d), cam, sampleDepth);
     const warns = draftWarnings(cam, fit === undefined ? undefined : fit);

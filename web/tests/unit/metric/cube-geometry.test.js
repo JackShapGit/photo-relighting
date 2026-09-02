@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   stageCorners, guessCamera, handlePoints, marksFromCamera, applyHandleDrag, clampStageDrag,
   houseEdgesPx, housePxToFt, clampHouse, cameraFromGizmoDelta, MIN_LIP_FRACTION,
-  houseForDims, houseDragPatch, houseWidthPatch,
+  houseForDims, houseDragPatch, houseWidthPatch, cameraDelta,
 } from '../../../src/metric/cube-geometry.js';
 import { defaultHouse } from '../../../src/rig/geometry.js';
 import { solveCamera, validateMarks, worldToPixel, SYNTHETIC_STAGE } from '../../../src/metric/calibration.js';
@@ -182,4 +182,16 @@ test('houseWidthPatch keeps the walls centred and sets their distance', () => {
   const p = houseWidthPatch({ left_wall_ft: -20, right_wall_ft: 40 }, 30);
   near(p.left_wall_ft, -5); near(p.right_wall_ft, 25);
   assert.deepEqual(Object.keys(p).sort(), ['left_wall_ft', 'right_wall_ft']);
+});
+
+test('cameraDelta inverts cameraFromGizmoDelta: the world delta between two cameras (dx via u_c, dy height, dz distance)', () => {
+  const cam = solveCamera(record, aspect);
+  const { camera: moved } = cameraFromGizmoDelta(cam, DIMS, [1.5, -2, 10]);
+  vnear(cameraDelta(cam, moved), [1.5, -2, 10], 1e-9);
+  vnear(cameraDelta(cam, cam), [0, 0, 0]);
+  // Re-solving the moved camera's marks reproduces the delta closely (Task 1's 0.5 % round trip).
+  const { marks } = cameraFromGizmoDelta(cam, DIMS, [0, 0, 10]);
+  const resolved = solveCamera({ ...record, marks }, aspect);
+  const d = cameraDelta(cam, resolved);
+  near(d[2], 10, 0.05); near(d[0], 0, 0.05); near(d[1], 0, 0.05);
 });

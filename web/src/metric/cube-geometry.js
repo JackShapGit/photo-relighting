@@ -198,6 +198,19 @@ export function houseWidthPatch(house, widthFt) {
 }
 
 /**
+ * The gizmo delta that turns camera `from` into camera `to` (inverse of
+ * cameraFromGizmoDelta, using `from`'s f/dist for the u_c → X conversion):
+ * where the draft's stage box sits relative to the applied frame in 3D.
+ */
+export function cameraDelta(from, to) {
+  return [
+    (to.u_c - from.u_c) * from.dist_ft / from.f,
+    to.height_ft - from.height_ft,
+    to.dist_ft - from.dist_ft,
+  ];
+}
+
+/**
  * Move the camera by a 3D gizmo delta in feet: dx slides the principal
  * point (u_c += dx·f/dist), dy raises the camera, dz moves it along −Z
  * (further into the house: dist += dz). Returns the camera and its marks.

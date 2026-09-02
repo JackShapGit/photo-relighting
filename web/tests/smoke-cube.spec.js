@@ -153,5 +153,56 @@ test('stage box: default pose, real drag, apply, undo, redo, toggle', async ({ p
   await houseToggle.click();
   await expect(houseG).toBeVisible();
 
+  // ── 3D (Task 5): both wireframes in the scene, toggles remove them, dashed while dirty, gizmo on the box ──
+  const box3d = (name) => page.evaluate((n) => {
+    const o = window.__scene3d?.getObjectByName(n);
+    return o ? { material: o.material.type, verts: o.geometry.attributes.position.count, pos: o.position.toArray() } : null;
+  }, name);
+  await expect.poll(() => box3d('stage-box'), { timeout: 15000 }).not.toBeNull();
+  const stage3d = await box3d('stage-box');
+  expect(stage3d.verts).toBe(24);
+  expect(stage3d.material).toBe('LineBasicMaterial');
+  expect(await box3d('house-box')).not.toBeNull();
+  await stageToggle.click();
+  await expect.poll(() => box3d('stage-box')).toBeNull();
+  await stageToggle.click();
+  await expect.poll(() => box3d('stage-box')).not.toBeNull();
+  await houseToggle.click();
+  await expect.poll(() => box3d('house-box')).toBeNull();
+  await houseToggle.click();
+  await expect.poll(() => box3d('house-box')).not.toBeNull();
+
+  // A real drag on the photo dirties the draft: the 3D boxes go dashed and sit at the draft's offset.
+  const lipR2 = overlay.locator('.cube-stage .cube-handle[data-key="lipR"]');
+  const b2 = await lipR2.boundingBox();
+  const x2 = b2.x + b2.width / 2, y2 = b2.y + b2.height / 2;
+  await page.mouse.move(x2, y2);
+  await page.mouse.down();
+  for (let i = 1; i <= 3; i++) await page.mouse.move(x2 - i * 10, y2, { steps: 2 });
+  await page.mouse.up();
+  await expect.poll(() => box3d('stage-box').then((o) => o?.material)).toBe('LineDashedMaterial');
+  expect(Math.abs((await box3d('stage-box')).pos[2])).toBeGreaterThan(0.01);
+
+  // Panel open with nothing selected: the gizmo sits on the stage box; a
+  // selected light takes it (the scene starts with the Key light selected);
+  // deselecting gives it back.
+  await page.click('#calibrate-btn');
+  await page.click('#ve-calibrate');
+  await expect(page.locator('#calib-panel')).toBeVisible();
+  const gizmoTarget = () => page.evaluate(() => window.__gizmo3d?.object?.name ?? null);
+  await page.evaluate(() => { window.__state.selectedId = '__scene__'; window.__onChange(); });
+  await expect.poll(gizmoTarget).toBe('stage-box');
+  await page.evaluate(() => { window.__state.selectedId = window.__state.lights[0].id; window.__onChange(); });
+  await expect.poll(gizmoTarget).not.toBe('stage-box');
+  await page.evaluate(() => { window.__state.selectedId = '__scene__'; window.__onChange(); });
+  await expect.poll(gizmoTarget).toBe('stage-box');
+
+  // Apply: solid again and back at the origin of the rebuilt frame.
+  await page.click('#calib-panel .cal-apply');
+  await expect.poll(() => box3d('stage-box').then((o) => o?.material), { timeout: 15000 }).toBe('LineBasicMaterial');
+  // The offset resets once applyCalibration runs (after the venue write), not on the Apply click itself.
+  await expect.poll(() => box3d('stage-box').then((o) => Math.abs(o?.pos[2] ?? 1)), { timeout: 15000 }).toBeLessThan(1e-6);
+  await page.click('#calib-panel .cal-close');
+
   expect(errors, errors.join('\n')).toEqual([]);
 });
