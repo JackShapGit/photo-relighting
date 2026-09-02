@@ -5,6 +5,7 @@ These models 422 on bad input; conversion to engine dataclasses happens via
 """
 from __future__ import annotations
 
+import math
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -13,29 +14,54 @@ from relighting_engine.lighting.models import Gobo, Light
 from relighting_engine.metric.calibration import Calibration
 
 _MARK_KEYS = ("lipL", "lipR", "top", "backL", "backR")
+_MARK_RANGE = (-0.5, 1.5)        # marks may sit a little outside the photo, never far
+_MIN_LIP_FRACTION = 0.05         # same as web/src/metric/calibration.js MIN_LIP_FRACTION
+
+Finite = Annotated[float, Field(allow_inf_nan=False)]
 
 
 class DepthFitModel(BaseModel):
-    a: float
-    b: float
+    a: Finite
+    b: Finite
 
 
 class CalibrationModel(BaseModel):
     version: int = 1
     units: Literal["ft", "m"] = "ft"
-    width_ft: Annotated[float, Field(gt=0.0)]
-    height_ft: Annotated[float, Field(gt=0.0)]
-    depth_ft: Annotated[float, Field(gt=0.0)]
+    width_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    height_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    depth_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
     marks: dict[str, list[float]]
     depth_fit: DepthFitModel | None = None
     depth_check: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _validate_marks(self) -> "CalibrationModel":
+        """Mirror of web/src/metric/calibration.js validateMarks, so a
+        degenerate record is a 422 here rather than a ZeroDivisionError in
+        solve_camera (500) or NaNs in a render."""
+        m = self.marks
         for k in _MARK_KEYS:
-            v = self.marks.get(k)
+            v = m.get(k)
             if not (isinstance(v, list) and len(v) == 2):
                 raise ValueError(f"marks.{k} must be [u, v]")
+            for c in v:
+                if not (isinstance(c, (int, float)) and math.isfinite(c)):
+                    raise ValueError(f"marks.{k} must be finite numbers")
+                if not (_MARK_RANGE[0] <= c <= _MARK_RANGE[1]):
+                    raise ValueError(f"marks.{k} is outside the photo")
+        w_lip = abs(m["lipR"][0] - m["lipL"][0])
+        w_back = abs(m["backR"][0] - m["backL"][0])
+        v_lip = (m["lipL"][1] + m["lipR"][1]) / 2.0
+        v_back = (m["backL"][1] + m["backR"][1]) / 2.0
+        if w_lip < _MIN_LIP_FRACTION:
+            raise ValueError("lip marks are too close together")
+        if m["top"][1] >= v_lip:
+            raise ValueError("top of opening must be above the lip")
+        if w_back >= w_lip:
+            raise ValueError("back line must be narrower than the lip")
+        if v_back >= v_lip:
+            raise ValueError("back line must appear above the lip line")
         return self
 
     def to_engine(self, aspect: float) -> Calibration:

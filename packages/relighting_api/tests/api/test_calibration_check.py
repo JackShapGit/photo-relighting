@@ -87,3 +87,25 @@ def test_check_404s_for_unknown_scene_when_model_available(monkeypatch, client):
     monkeypatch.setattr(metric_check, "available", lambda: True)
     r = client.post("/scenes/nope/calibration/check", json={"calibration": CAL})
     assert r.status_code == 404
+
+
+def test_check_422s_on_degenerate_marks(monkeypatch, client):
+    from relighting_engine.depth import metric_check
+    monkeypatch.setattr(metric_check, "available", lambda: True)
+    bad = {**CAL, "marks": {**MARKS, "lipR": [0.1, 0.61]}}
+    r = client.post("/scenes/nope/calibration/check", json={"calibration": bad})
+    assert r.status_code == 422
+
+
+def test_check_is_silent_when_compare_raises(monkeypatch, client):
+    from relighting_engine.depth import metric_check
+    monkeypatch.setattr(metric_check, "available", lambda: True)
+
+    def boom(*a, **k):
+        raise RuntimeError("model exploded")
+
+    monkeypatch.setattr(metric_check, "compare", boom)
+    sid = _scene(client)
+    r = client.post(f"/scenes/{sid}/calibration/check", json={"calibration": CAL})
+    assert r.status_code == 200
+    assert r.json() == {"available": False, "median_error_pct": None}

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import re
 import zipfile
 from typing import Any
@@ -27,6 +28,7 @@ from relighting_api.scene_store import DEFAULT_WORKSPACE
 from relighting_api.schemas import CalibrationModel
 
 router = APIRouter(prefix="/scenes")
+logger = logging.getLogger(__name__)
 
 # Workspaces are user-supplied URL strings, so we clamp them to a safe set —
 # alphanum + dash + underscore, 1..32 chars. Anything else 400s.
@@ -164,11 +166,20 @@ async def check_calibration(
     scene = request.app.state.scenes.get(scene_id, workspace_id=_workspace(request))
     if scene is None:
         raise HTTPException(status_code=404, detail="scene not found")
-    prepared = request.app.state.sessions.get(scene["session_id"])
+    sessions = request.app.state.sessions
+    prepared = sessions.get(scene["session_id"])
     if prepared is None:
         raise HTTPException(status_code=409, detail="image session missing")
     cal = req.calibration.to_engine(prepared.height / prepared.width)
-    result = await run_in_threadpool(metric_check.compare, prepared, cal, req.calibration.marks)
+    # Same per-session lock the render routes take, so the metric model never
+    # runs alongside a render on the same session; any failure inside the
+    # model is "no opinion", never an error (spec §Error handling).
+    async with sessions.lock(scene["session_id"]):
+        try:
+            result = await run_in_threadpool(metric_check.compare, prepared, cal, req.calibration.marks)
+        except Exception:  # noqa: BLE001
+            logger.warning("calibration cross-check failed for scene %s", scene_id, exc_info=True)
+            return {"available": False, "median_error_pct": None}
     return {
         "available": result is not None,
         "median_error_pct": result["median_error_pct"] if result else None,
