@@ -68,6 +68,43 @@ class CalibrationModel(BaseModel):
         return Calibration.from_dict(self.model_dump(), aspect)
 
 
+# ─── Venues (Spec 2) ─────────────────────────────────────────────────────────
+
+class GridModel(BaseModel):
+    rows: Annotated[int, Field(ge=1, le=6)] = 3
+    cols: Annotated[int, Field(ge=1, le=6)] = 3
+    number_from_stage_left: bool = False
+
+
+class PositionModel(BaseModel):
+    """A hanging position in the Spec 1 world frame (feet). Pipes need a trim
+    height, booms an X offset, floor positions only an upstage distance."""
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    kind: Literal["pipe", "boom", "floor"]
+    upstage_ft: Finite
+    trim_ft: Finite | None = None
+    offset_ft: Finite | None = None
+
+    @model_validator(mode="after")
+    def _validate_kind(self) -> "PositionModel":
+        if self.kind == "pipe" and self.trim_ft is None:
+            raise ValueError("pipe position needs trim_ft")
+        if self.kind == "boom" and self.offset_ft is None:
+            raise ValueError("boom position needs offset_ft")
+        return self
+
+
+class VenueModel(BaseModel):
+    name: str = Field(min_length=1)
+    width_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    height_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    depth_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    grid: GridModel = Field(default_factory=GridModel)
+    focus_height_ft: Annotated[float, Field(ge=0.0, allow_inf_nan=False)] = 5.0
+    positions: list[PositionModel] = Field(default_factory=list)
+
+
 class GoboModel(BaseModel):
     texture_id: str
     scale: float = 1.0

@@ -13,7 +13,9 @@ import {
   prepare, listGobos, render as serverRender, renderLayers,
   listScenes, getScene, createScene, updateScene, renameScene,
   refineMask, getCapabilities, currentWorkspace, checkCalibration,
+  listVenues, createVenue, getVenue, updateVenue,
 } from './api.js';
+import { mergeVenueIntoCalibration } from './rig/geometry.js';
 import {
   invalidatePolish,
   onPolishChange,
@@ -88,7 +90,85 @@ function serializeSceneState() {
     selectedId: state.selectedId,
     calibration: state.calibration ? stripCamera(state.calibration) : null,
     units: state.units || 'ft',
+    // Venue reference (Spec 2): the id plus an embedded copy so a deleted or
+    // unreachable venue never breaks the scene. state.venue itself is live.
+    venue_id: state.venue_id ?? null,
+    venue_snapshot: state.venue_snapshot ?? null,
   };
+}
+
+// ─── Venue reference (Spec 2) ─────────────────────────────────────────────
+const DEFAULT_GRID = { rows: 3, cols: 3, number_from_stage_left: false };
+
+function venueFromCalibration(name, cal) {
+  return {
+    name: (name || '').trim() || 'Untitled venue',
+    width_ft: cal.width_ft, height_ft: cal.height_ft, depth_ft: cal.depth_ft,
+    grid: DEFAULT_GRID, focus_height_ft: 5, positions: [],   // server fills the starter rig
+  };
+}
+
+// Resolve the scene's venue on load. Migration: a calibrated scene with no
+// venue gets one named after itself (dimensions from the calibration, starter
+// positions) and is saved. Returns true when the scene needs saving.
+async function loadSceneVenue(scene, s) {
+  state.venue_id = s.venue_id ?? null;
+  state.venue_snapshot = s.venue_snapshot ?? null;
+  state.venue = null;
+  state.venueMissing = false;
+  state.venueMigrated = false;
+  const cal = s.calibration || null;
+  let dirty = false;
+  if (cal?.width_ft && !state.venue_id) {
+    try {
+      const v = await createVenue(venueFromCalibration(scene.name, cal));
+      state.venue_id = v.id; state.venue = v; state.venue_snapshot = v;
+      state.venueMigrated = true;
+      dirty = true;
+    } catch (e) {
+      console.warn('venue migration failed; scene keeps its calibration dimensions', e);
+    }
+  }
+  if (state.venue_id && !state.venue) {
+    try {
+      state.venue = await getVenue(state.venue_id);
+      if (JSON.stringify(state.venue) !== JSON.stringify(state.venue_snapshot)) {
+        state.venue_snapshot = state.venue;
+        dirty = true;
+      }
+    } catch (e) {
+      // 404 (deleted) or unreachable: run from the embedded snapshot.
+      state.venue = state.venue_snapshot;
+      state.venueMissing = true;
+      console.warn('venue unavailable; using the scene snapshot', e);
+    }
+  }
+  return dirty;
+}
+
+// Keep the venue's dimensions in step with a calibration applied from the
+// panel (the panel's dimension fields write to the venue); a scene without a
+// venue gets one now rather than on its next load.
+async function syncVenueWithCalibration(record) {
+  if (!record || !state.sceneId) return;
+  try {
+    if (!state.venue_id) {
+      const v = await createVenue(venueFromCalibration(state.sceneName, record));
+      state.venue_id = v.id; state.venue = v; state.venue_snapshot = v; state.venueMissing = false;
+    } else if (state.venue && !state.venueMissing
+        && ['width_ft', 'height_ft', 'depth_ft'].some((k) => state.venue[k] !== record[k])) {
+      const v = await updateVenue(state.venue_id, {
+        ...state.venue, width_ft: record.width_ft, height_ft: record.height_ft, depth_ft: record.depth_ft,
+      });
+      state.venue = v; state.venue_snapshot = v;
+    } else {
+      return;
+    }
+    updateBadge();
+    scheduleSave();
+  } catch (e) {
+    console.warn('venue sync failed', e);
+  }
 }
 
 function scheduleSave() {
@@ -347,11 +427,14 @@ async function applyScene(scene) {
   state.height = scene.height;
   state.assetUrls = scene.assets;
 
-  // Calibration persists without the solved camera; re-solve against this
-  // image's aspect and make sure every light carries feet coordinates.
-  // (Display units are a viewer preference kept in localStorage, not restored
-  // from the scene.)
-  state.calibration = s.calibration ? solveRecord(s.calibration, state.height / state.width) : null;
+  // Venue first (migrating a calibrated scene without one), then the
+  // calibration: its stage dimensions mirror the venue, the camera is
+  // re-solved against this image's aspect, and every light gets feet
+  // coordinates. (Display units are a viewer preference kept in
+  // localStorage, not restored from the scene.)
+  const venueDirty = await loadSceneVenue(scene, s);
+  const calRecord = mergeVenueIntoCalibration(s.calibration || null, state.venue);
+  state.calibration = calRecord ? solveRecord(calRecord, state.height / state.width) : null;
   if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
 
   tree.render();
@@ -374,22 +457,27 @@ async function applyScene(scene) {
   document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
   initialized = true;
   setStatus('');
+  if (venueDirty) scheduleSave();     // persist the migrated venue reference / refreshed snapshot
 }
 
 async function runNewSceneFlow({ canCancel }) {
   while (true) {
-    const result = await openNewScenePopup({ canCancel });
+    let venues = [];
+    try { venues = await listVenues(); } catch (e) { console.warn('venue list', e); }
+    const result = await openNewScenePopup({ canCancel, venues });
     if (!result) return null;     // cancelled
     try {
       setStatus('Preparing image…');
       const prepared = await prepare(result.file, result.mode, result.segmenter);
       // A new scene gets a fresh default light tree (Key + Rim), not the
       // current scene's lighting. Otherwise +New Scene would inherit your
-      // last setup, which is rarely what you want.
+      // last setup, which is rarely what you want. The picked venue (if any)
+      // is referenced from the start; "New venue…" stays null until a
+      // calibration creates one.
       const created = await createScene({
         name: result.name,
         sessionId: prepared.session_id,
-        state: defaultSceneState(),
+        state: { ...defaultSceneState(), venue_id: result.venueId || null, venue_snapshot: null },
       });
       const full = await getScene(created.id);
       await applyScene(full);
@@ -852,6 +940,7 @@ function applyCalibration(record) {
   document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
   redrawAndSave();
   handlesAPI?.reposition();   // edge arrows / hidden handles follow the calibration state
+  if (record) syncVenueWithCalibration(record);   // async; the scene keeps its venue on Clear
 }
 
 // Server-side metric-depth cross-check of a just-applied record. Persists
@@ -895,9 +984,15 @@ function updateBadge() {
   calibrateBtn.textContent = formatBadge(rec);
   calibrateBtn.classList.toggle('is-calibrated', !!rec);
   calibrateBtn.classList.toggle('is-no-fit', !!rec && !rec.depth_fit);
-  calibrateBtn.title = !rec
+  let title = !rec
     ? 'Calibrate the stage so lights are placed in real-world units'
     : rec.depth_fit ? 'Stage calibration (click to edit)' : NO_FIT_TITLE;
+  if (rec && state.venue) {
+    title += ` · Venue: ${state.venue.name}`;
+    if (state.venueMigrated) title += ' (created from this scene)';
+    if (state.venueMissing) title += ' (missing; using the scene snapshot)';
+  }
+  calibrateBtn.title = title;
 }
 function applyUnits(u) {
   state.units = u === 'm' ? 'm' : 'ft';

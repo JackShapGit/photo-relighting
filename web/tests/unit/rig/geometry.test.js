@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { positionToWorld, nearestOffset, areaLabels, areaCenter, linearEndpoints, starterPositions, defaultFixtureName, SYNTHETIC_VENUE } from '../../../src/rig/geometry.js';
+import { positionToWorld, nearestOffset, areaLabels, areaCenter, linearEndpoints, starterPositions, defaultFixtureName, mergeVenueIntoCalibration, SYNTHETIC_VENUE } from '../../../src/rig/geometry.js';
 const near = (a, b, t = 1e-9) => assert.ok(Math.abs(a - b) <= t, `${a} !~ ${b}`);
 const V = SYNTHETIC_VENUE;
 const pos = (name) => V.positions.find((p) => p.name === name);
@@ -50,6 +50,19 @@ test('starterPositions scale with the venue', () => {
   near(foh.upstage_ft, -39); near(foh.trim_ft, 22);
   near(p.find((x) => x.name === '1st electric').upstage_ft, 6);
   near(p.find((x) => x.name === 'Boom SR').offset_ft, -22);
+});
+
+test('mergeVenueIntoCalibration mirrors the venue dimensions onto a copy of the calibration', () => {
+  const cal = { version: 1, units: 'ft', width_ft: 40, height_ft: 20, depth_ft: 30, marks: { lipL: [0.1, 0.6] }, depth_fit: { a: -1, b: 2 }, depth_check: null };
+  const venue = { id: 'v1', width_ft: 52, height_ft: 24, depth_ft: 36, positions: [] };
+  const merged = mergeVenueIntoCalibration(cal, venue);
+  assert.notEqual(merged, cal, 'returns a copy');
+  assert.deepEqual([merged.width_ft, merged.height_ft, merged.depth_ft], [52, 24, 36]);
+  assert.deepEqual([cal.width_ft, cal.height_ft, cal.depth_ft], [40, 20, 30], 'input untouched');
+  assert.deepEqual(merged.marks, cal.marks); assert.deepEqual(merged.depth_fit, cal.depth_fit);
+  // No venue (or no calibration): pass-through.
+  assert.equal(mergeVenueIntoCalibration(cal, null), cal);
+  assert.equal(mergeVenueIntoCalibration(null, venue), null);
 });
 
 test('defaultFixtureName uses a short position name', () => {

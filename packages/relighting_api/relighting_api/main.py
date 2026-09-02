@@ -1,10 +1,13 @@
 """FastAPI app factory. The factory pattern lets tests skip engine init."""
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from relighting_api import auth
@@ -17,8 +20,23 @@ from relighting_api.routes import refine as refine_route
 from relighting_api.routes import render as render_route
 from relighting_api.routes import scenes as scenes_route
 from relighting_api.routes import session as session_route
+from relighting_api.routes import venues as venues_route
 from relighting_api.scene_store import SceneStore
 from relighting_api.session_store import SessionStore
+from relighting_api.venue_store import VenueStore
+
+def _finite(obj):
+    """Replace non-finite floats (and non-JSON objects) so an error body encodes."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else str(obj)
+    if isinstance(obj, dict):
+        return {k: _finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_finite(v) for v in obj]
+    if isinstance(obj, (str, int, bool)) or obj is None:
+        return obj
+    return str(obj)
+
 
 class _RevalidatingStaticFiles(StaticFiles):
     """StaticFiles that forces a conditional request on every asset.
@@ -48,8 +66,17 @@ def create_app(skip_engine: bool = False) -> FastAPI:
 
     app = FastAPI(title="relighting-api", version="0.1.0")
     auth.install(app)
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        # FastAPI echoes the offending input in the 422 body; a NaN/Infinity
+        # float there is not JSON-encodable and would turn the 422 into a 500.
+        return JSONResponse(status_code=422, content={"detail": _finite(exc.errors())})
     app.state.sessions = SessionStore(cache_dir=cache_dir)
     app.state.scenes = SceneStore(db_path=scenes_db)
+    # Venues share the scenes database file so the delete guard can count
+    # referencing scenes in one query.
+    app.state.venues = VenueStore(db_path=scenes_db)
 
     # Detect optional capabilities once at startup. Polish requires the
     # [diffusion] extra + GPU + enough free VRAM; if any check fails the
@@ -83,6 +110,7 @@ def create_app(skip_engine: bool = False) -> FastAPI:
     app.include_router(render_route.router)
     app.include_router(layers_route.router)
     app.include_router(scenes_route.router)
+    app.include_router(venues_route.router)
     app.include_router(session_route.router)
 
     # Serve gobo PNGs and per-session asset PNGs.

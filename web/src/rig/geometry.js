@@ -73,6 +73,22 @@ export function shortName(name) {
 }
 export function defaultFixtureName(position, index) { return `${shortName(position.name)}-${index}`; }
 
+/**
+ * The calibration record keeps only photo-specific parts (marks, depth fit,
+ * units); its stage dimensions are a read-only mirror of the scene's venue.
+ * Returns a copy with the venue's width/height/depth, or the input untouched
+ * when either side is missing.
+ */
+export function mergeVenueIntoCalibration(calibration, venue) {
+  if (!calibration || !venue) return calibration;
+  return {
+    ...calibration,
+    width_ft: venue.width_ft,
+    height_ft: venue.height_ft,
+    depth_ft: venue.depth_ft,
+  };
+}
+
 export const SYNTHETIC_VENUE = {
   id: 'venue_test', name: 'Test House', width_ft: 40, height_ft: 20, depth_ft: 30,
   grid: { rows: 3, cols: 3, number_from_stage_left: false }, focus_height_ft: 5,

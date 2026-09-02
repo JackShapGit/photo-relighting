@@ -1,9 +1,16 @@
 // Modal dialog for creating a new scene. Resolves to the picked
-// { name, file, mode } once the user clicks Create, or null if cancelled
-// (Cancel is hidden when canCancel === false — i.e. fresh DB, no scenes yet).
+// { name, file, mode, segmenter, venueId } once the user clicks Create, or
+// null if cancelled (Cancel is hidden when canCancel === false — i.e. fresh
+// DB, no scenes yet). `venues` fills the venue picker; "New venue…" (the
+// default) leaves venueId null and lets calibration create one later.
 
-export function openNewScenePopup({ canCancel, title = 'New Scene' } = {}) {
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+export function openNewScenePopup({ canCancel, title = 'New Scene', venues = [] } = {}) {
   return new Promise((resolve) => {
+    const venueOptions = ['<option value="">New venue…</option>']
+      .concat((venues || []).map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.name)}</option>`))
+      .join('');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
@@ -31,6 +38,10 @@ export function openNewScenePopup({ canCancel, title = 'New Scene' } = {}) {
             <option value="sam2">SAM2 (better edges)</option>
           </select>
         </label>
+        <label class="modal-row">
+          <span>Venue</span>
+          <select id="ns-venue">${venueOptions}</select>
+        </label>
         <div class="modal-thumb-wrap">
           <img id="ns-thumb" alt="preview" hidden />
           <span id="ns-thumb-empty">Pick an image to preview…</span>
@@ -49,6 +60,7 @@ export function openNewScenePopup({ canCancel, title = 'New Scene' } = {}) {
     const fileInput = $('#ns-file');
     const modeSelect = $('#ns-mode');
     const segSelect = $('#ns-segmenter');
+    const venueSelect = $('#ns-venue');
     const thumb = $('#ns-thumb');
     const thumbEmpty = $('#ns-thumb-empty');
     const errEl = $('#ns-error');
@@ -100,6 +112,7 @@ export function openNewScenePopup({ canCancel, title = 'New Scene' } = {}) {
         file: pickedFile,
         mode: modeSelect.value,
         segmenter: segSelect.value,
+        venueId: venueSelect.value || null,
       };
       cleanupAnd(result)();
     });

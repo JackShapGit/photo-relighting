@@ -19,6 +19,19 @@ test('playground loads and the view-mode control toggles the divider', async ({ 
   const divider = page.locator('#stage-divider');
   await expect(divider).toBeVisible();
 
+  // The new-scene popup carries the venue picker with "New venue…" selected
+  // by default. It opens by itself only on a fresh server; once earlier runs
+  // have created scenes, open it from the header button.
+  if (!(await page.locator('#ns-name').isVisible())) {
+    await page.locator('#new-scene-btn').dispatchEvent('click');
+  }
+  const venuePick = page.locator('#ns-venue');
+  await expect(venuePick).toBeVisible();
+  await expect(venuePick.locator('option').first()).toHaveText('New venue…');
+  await expect(venuePick).toHaveValue('');
+  const cancel = page.locator('#ns-cancel');
+  if (await cancel.count()) await cancel.dispatchEvent('click');
+
   // A fresh server has no scenes, so the (non-cancellable) new-scene modal
   // overlays the header. Dispatch the click straight to the buttons; the
   // modal is not what this smoke test covers.

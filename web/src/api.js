@@ -13,10 +13,14 @@ const WORKSPACE = (() => {
 
 export function currentWorkspace() { return WORKSPACE; }
 
-function wsUrl(path) {
+export function wsUrl(path) {
   const sep = path.includes('?') ? '&' : '?';
   return `${path}${sep}workspace=${encodeURIComponent(WORKSPACE)}`;
 }
+
+// Venues (Spec 2) live in their own module but are re-exported here so the
+// app keeps one API import.
+export { listVenues, createVenue, getVenue, updateVenue, deleteVenue, duplicateVenue } from './rig/venue-api.js';
 
 export async function prepare(file, mode, segmenter = 'rmbg') {
   const fd = new FormData();
