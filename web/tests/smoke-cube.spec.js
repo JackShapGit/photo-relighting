@@ -107,6 +107,21 @@ test('stage box: default pose, real drag, apply, undo, redo, toggle', async ({ p
       label: document.querySelector('#cube-overlay .cube-house .cube-label[data-field="ceiling_ft"]').textContent,
     };
   });
+  // Rig tab (Task 6): state the first pipe's height against the ceiling with
+  // a real change of its Ref select: the stated number becomes ceiling − trim
+  // and the stored trim does not move.
+  const foh = await page.evaluate(() => {
+    const p = window.__state.venue.positions.find((q) => q.kind === 'pipe');
+    return { id: p.id, trim: p.trim_ft, ceiling: window.__state.venue.house.ceiling_ft };
+  });
+  await expect(page.locator('#rig-root .rig-positions')).toBeVisible();
+  await page.locator(`#rig-root select[data-key="pos:${foh.id}:ref"]`).selectOption('ceiling');
+  await expect.poll(() => page.evaluate((id) => {
+    const p = window.__state.venue.positions.find((q) => q.id === id);
+    return { ref: p.height_ref, input: p.height_input_ft, trim: p.trim_ft };
+  }, foh.id)).toEqual({ ref: 'ceiling', input: foh.ceiling - foh.trim, trim: foh.trim });
+  await expect(page.locator(`#rig-root input[data-key="pos:${foh.id}:trim_ft"]`)).toHaveValue((foh.ceiling - foh.trim).toFixed(1));
+
   const hBefore = await readHouse();
   const cb = await ceilHandle.boundingBox();
   const ccx = cb.x + cb.width / 2, ccy = cb.y + cb.height / 2;
@@ -120,13 +135,10 @@ test('stage box: default pose, real drag, apply, undo, redo, toggle', async ({ p
   expect(hAfter.dirty).toBe(true);
   expect(hAfter.label).not.toBe(hBefore.label);
 
-  // A pipe stated against the ceiling keeps its drop when the house is applied.
-  await page.evaluate(() => {
-    const p = window.__state.venue.positions.find((q) => q.kind === 'pipe');
-    p.height_ref = 'ceiling'; p.height_input_ft = 4;
-  });
-  // The scene is calibrated with a venue now, so the badge opens the venue
-  // editor; its Calibration button opens the panel.
+  // The ceiling-referenced pipe keeps its stated drop when the higher ceiling
+  // is applied: its deck trim rises by the ceiling's move. The scene is
+  // calibrated with a venue now, so the badge opens the venue editor; its
+  // Calibration button opens the panel.
   await page.click('#calibrate-btn');
   await page.click('#ve-calibrate');
   await expect(page.locator('#calib-panel')).toBeVisible();
@@ -136,14 +148,20 @@ test('stage box: default pose, real drag, apply, undo, redo, toggle', async ({ p
     const s = window.__state;
     const v = await (await fetch(`/venues/${s.venue_id}?workspace=default`)).json();
     const p = v.positions.find((q) => q.kind === 'pipe');
-    return { ceiling: v.house.ceiling_ft, estimated: v.house.estimated, trim: p.trim_ft, ref: p.height_ref, input: p.height_input_ft, live: s.venue.house.ceiling_ft, dirty: window.__calDraft().dirty };
+    const bar = window.__scene3d.getObjectByName('rig-overlay')?.children.find((o) => o.userData?.positionId === p.id);
+    const live = s.venue.positions.find((q) => q.id === p.id);
+    return { ceiling: v.house.ceiling_ft, estimated: v.house.estimated, trim: p.trim_ft, ref: p.height_ref, input: p.height_input_ft, live: s.venue.house.ceiling_ft, liveTrim: live.trim_ft, barY: bar?.position.y ?? null, dirty: window.__calDraft().dirty };
   });
   expect(persisted.ceiling).toBeCloseTo(hAfter.ceiling, 3);
   expect(persisted.live).toBeCloseTo(hAfter.ceiling, 3);
   expect(persisted.estimated).toBe(false);
   expect(persisted.ref).toBe('ceiling');
-  expect(persisted.input).toBe(4);
-  expect(persisted.trim).toBeCloseTo(hAfter.ceiling - 4, 3);
+  expect(persisted.input).toBeCloseTo(foh.ceiling - foh.trim, 6);                 // the stated drop is unchanged
+  expect(persisted.trim).toBeCloseTo(hAfter.ceiling - persisted.input, 3);         // the deck trim rose with the ceiling
+  expect(persisted.trim - foh.trim).toBeCloseTo(hAfter.ceiling - foh.ceiling, 3);
+  expect(persisted.liveTrim).toBeCloseTo(persisted.trim, 6);
+  expect(persisted.barY).toBeCloseTo(persisted.trim, 3);                           // the 3D bar moved with it
+  await expect(page.locator(`#rig-root input[data-key="pos:${foh.id}:trim_ft"]`)).toHaveValue(persisted.input.toFixed(1));
   expect(persisted.dirty).toBe(false);
 
   // House toggle (panel closed): off hides the house group, on shows it.

@@ -4,7 +4,7 @@ import {
   rowsForVenue, nextOffset, positionLabels, positionFields, changeKind, newPosition,
   buildFixtureLight, cloneFixture, optionControl, validPositionValue, validOffset,
   setFixtureType, setFixtureOption, setFixturePosition, setFixtureArea, setFixtureOffset,
-  CUSTOM_ROW_ID,
+  CUSTOM_ROW_ID, heightRefHint,
 } from '../../../src/rig/rig-tab.js';
 import { SYNTHETIC_VENUE } from '../../../src/rig/geometry.js';
 import { solveRecord } from '../../../src/metric/light-metric.js';
@@ -86,6 +86,31 @@ test('newPosition is a pipe 8 ft upstage of the last one at the venue height, na
   assert.equal(first.upstage_ft, 0);
   assert.equal(first.name, 'Pipe 1');
   assert.notEqual(newPosition(V).id, newPosition(V).id, 'fresh ids');
+});
+
+test('newPosition states its height in the venue default reference (height_input_ft from the deck trim)', () => {
+  const house = { left_wall_ft: -30, right_wall_ft: 30, floor_drop_ft: 3, ceiling_ft: 30, depth_ft: 60, estimated: false };
+  const ceiling = newPosition({ ...V, house, default_height_ref: 'ceiling' });
+  assert.equal(ceiling.height_ref, 'ceiling');
+  assert.equal(ceiling.trim_ft, 20, 'stored trim stays deck-relative');
+  assert.equal(ceiling.height_input_ft, 10, '30 ft ceiling − 20 ft trim');
+  const floor = newPosition({ ...V, house, default_height_ref: 'house_floor' });
+  assert.equal(floor.height_ref, 'house_floor');
+  assert.equal(floor.height_input_ft, 23);
+  const deck = newPosition({ ...V, house, default_height_ref: 'deck' });
+  assert.equal(deck.height_ref, 'deck');
+  assert.equal(deck.height_input_ft, undefined, 'a deck height carries no stated number');
+  assert.equal(newPosition(V).height_ref, 'deck', 'no default on the venue: deck');
+  const noHouse = newPosition({ ...V, default_height_ref: 'ceiling' });
+  assert.equal(noHouse.height_ref, 'ceiling');
+  assert.equal(noHouse.height_input_ft, 10, 'the estimated house (ceiling = height + 10) is used when the venue has none');
+});
+
+test('heightRefHint names the reference a boom fixture height is stated in', () => {
+  assert.equal(heightRefHint('deck'), 'above deck');
+  assert.equal(heightRefHint('house_floor'), 'above house floor');
+  assert.equal(heightRefHint('ceiling'), 'below ceiling');
+  assert.equal(heightRefHint(undefined), 'above deck');
 });
 
 // ── buildFixtureLight / cloneFixture ─────────────────────────────────────

@@ -25,6 +25,10 @@ import {
 
 const REF_LABELS = { deck: 'Deck', house_floor: 'House floor', ceiling: 'Ceiling' };
 const REF_OPTIONS = HEIGHT_REFS.map((r) => ({ value: r, label: REF_LABELS[r] }));
+const REF_HINTS = { deck: 'above deck', house_floor: 'above house floor', ceiling: 'below ceiling' };
+
+/** How a height stated in this reference reads next to its number ("below ceiling"). */
+export function heightRefHint(ref) { return REF_HINTS[ref] || REF_HINTS.deck; }
 
 export const CUSTOM_ROW_ID = 'custom';
 export { CAP_MESSAGE };
@@ -87,17 +91,27 @@ export function changeKind(position, kind, venue) {
 
 const freshPositionId = () => `pos_${newId()}`;
 
-/** "Add position": a pipe 8 ft upstage of the last position at the venue's opening height. */
+/** "Add position": a pipe 8 ft upstage of the last position at the venue's
+ * opening height, its height stated in the venue's default reference
+ * (trim_ft stays deck-relative; height_input_ft carries the stated number). */
 export function newPosition(venue) {
   const ps = venue?.positions || [];
   const last = ps.length ? ps[ps.length - 1] : null;
-  return {
+  const trim_ft = venue?.height_ft ?? 20;
+  const ref = HEIGHT_REFS.includes(venue?.default_height_ref) ? venue.default_height_ref : 'deck';
+  const p = {
     id: freshPositionId(),
     name: `Pipe ${ps.length + 1}`,
     kind: 'pipe',
     upstage_ft: last ? (last.upstage_ft ?? 0) + NEW_PIPE_STEP_FT : 0,
-    trim_ft: venue?.height_ft ?? 20,
+    trim_ft,
+    height_ref: ref,
   };
+  if (ref !== 'deck') {
+    const house = venue?.house || defaultHouse({ width_ft: venue?.width_ft ?? 40, height_ft: trim_ft, depth_ft: venue?.depth_ft ?? 30 });
+    p.height_input_ft = fromDeck(trim_ft, ref, house);
+  }
+  return p;
 }
 
 export function validPositionValue(field, ft, venue) {
@@ -536,7 +550,10 @@ export function mountRigTab({ rootEl, getState, onVenueChange, onLightsChange, o
             setFixtureOffset(L, L.fixture.offset_ft, venue, record); commit(); return true;
           });
           off.title = `${bref === 'deck' ? 'Height' : REF_LABELS[bref]} (${units}) · ${describeHeight(f.offset_ft, house, units)}`;
-          tr.appendChild(cell(off));
+          // The column header says "Offset"; a boom height reads in the boom's reference.
+          const heightCell = cell(off);
+          heightCell.appendChild(el('span', 'rig-ref-hint', heightRefHint(bref)));
+          tr.appendChild(heightCell);
         } else if (pos) {
           const off = lengthInput(f.offset_ft, units, `fix:${L.id}:offset`, (ft) => {
             if (!validOffset(pos, ft, venue)) return false;

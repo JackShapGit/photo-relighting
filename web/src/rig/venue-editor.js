@@ -5,7 +5,7 @@
 // module never talks to the API itself and its pure helpers (badgeText,
 // venueFromForm) run under node --test.
 import { renderPositionsTable } from './rig-tab.js';
-import { toDisplay, parseLength } from '../metric/units.js';
+import { toDisplay, parseLength, formatLength } from '../metric/units.js';
 import { clampHouse } from '../metric/cube-geometry.js';
 import { defaultHouse } from './geometry.js';
 import { HEIGHT_REFS } from './height-ref.js';
@@ -61,7 +61,9 @@ export function venueFromForm(values, units = 'ft', base = {}) {
     positions: values.positions || base.positions || [],
   };
   // House (calibration cube): untouched fields keep the base house as is
-  // (still `estimated`); edited fields are parsed in the unit and clamped.
+  // (still `estimated`); edited fields are parsed in the unit and run through
+  // clampHouse. A value the clamp would alter is reported with its rule (the
+  // clamped value is kept on the venue, but the errors block Save).
   let house = base.house || null;
   if (values.house && values.house_edited) {
     const patch = {};
@@ -72,6 +74,11 @@ export function venueFromForm(values, units = 'ft', base = {}) {
     if (Number.isFinite(width_ft) && Number.isFinite(height_ft) && Number.isFinite(depth_ft)) {
       const dims = { width_ft, height_ft, depth_ft };
       house = clampHouse(house || defaultHouse(dims), dims, patch);
+      const altered = (f) => f in patch && Math.abs(house[f] - patch[f]) > 1e-6;
+      if (altered('floor_drop_ft')) errors.push('Floor drop must be zero or more (the house floor is at or below the deck)');
+      if (altered('ceiling_ft')) errors.push(`Ceiling must clear the opening height (at least ${formatLength(height_ft + 0.5, units)})`);
+      if (altered('left_wall_ft') || altered('right_wall_ft')) errors.push(`Walls must be at least the stage width apart (${formatLength(width_ft, units)})`);
+      if (altered('depth_ft')) errors.push(`House depth must be at least ${formatLength(1, units)}`);
     }
   }
   if (house) venue.house = house;
@@ -167,7 +174,9 @@ export function openVenueEditor({ venue, units = 'ft', onSave, onDuplicate, onDe
     }
 
     function drawPositions() {
-      renderPositionsTable($('#ve-positions'), { ...venue, house: house0, positions }, (next) => {
+      // The editor's own default-reference select governs positions added here.
+      const default_height_ref = $('#ve-href')?.value || venue.default_height_ref || 'deck';
+      renderPositionsTable($('#ve-positions'), { ...venue, house: house0, positions, default_height_ref }, (next) => {
         positions = next.positions;
         drawPositions();
       }, { units: u });
@@ -186,6 +195,7 @@ export function openVenueEditor({ venue, units = 'ft', onSave, onDuplicate, onDe
     for (const input of overlay.querySelectorAll('.ve-house')) {
       input.addEventListener('input', () => { houseEdited = true; $('#ve-house-note').hidden = true; });
     }
+    $('#ve-href').addEventListener('change', drawPositions);
 
     $('#ve-close').addEventListener('click', () => close(null));
     if (onCalibrate) $('#ve-calibrate').addEventListener('click', () => { close('calibrate'); onCalibrate(); });

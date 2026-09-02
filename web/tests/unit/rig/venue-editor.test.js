@@ -65,17 +65,32 @@ test('venueFromForm: untouched house fields keep the base house (still estimated
   assert.equal(venueFromForm(form(), 'ft', V).venue.house, undefined, 'no house on the base and none typed: none written');
 });
 
-test('venueFromForm parses edited house fields in the current unit and clamps them; edits clear estimated', () => {
-  const { venue, errors } = venueFromForm(form({ house: houseForm({ ceiling: '34', floor_drop: '-2', left: '-28' }), house_edited: true }), 'ft', { ...V, house: HOUSE });
+test('venueFromForm parses edited house fields in the current unit; valid edits clear estimated without messages', () => {
+  const { venue, errors } = venueFromForm(form({ house: houseForm({ ceiling: '34', left: '-28' }), house_edited: true }), 'ft', { ...V, house: HOUSE });
   assert.deepEqual(errors, []);
   assert.equal(venue.house.ceiling_ft, 34);
-  assert.equal(venue.house.floor_drop_ft, 0, 'floor cannot be above the deck');
   assert.equal(venue.house.left_wall_ft, -28);
   assert.equal(venue.house.estimated, false);
-  const low = venueFromForm(form({ house: houseForm({ ceiling: '15' }), house_edited: true }), 'ft', { ...V, house: HOUSE }).venue.house;
-  assert.ok(low.ceiling_ft > 20, 'ceiling clamped above the opening');
   const m = venueFromForm(form({ width: '12.2', height: '6.1', depth: '9.1', house: houseForm({ left: '-9', right: '9', floor_drop: '1', ceiling: '9', depth: '18' }), house_edited: true }), 'm', { ...V, house: HOUSE }).venue.house;
   near(m.left_wall_ft, -9 / 0.3048); near(m.ceiling_ft, 9 / 0.3048); near(m.depth_ft, 18 / 0.3048);
   const bad = venueFromForm(form({ house: houseForm({ ceiling: 'high' }), house_edited: true }), 'ft', { ...V, house: HOUSE }).errors;
   assert.ok(bad.some((e) => /ceiling/i.test(e)));
+});
+
+test('venueFromForm: a house value the clamp would alter is reported with its rule (and the value clamped)', () => {
+  const run = (over) => venueFromForm(form({ house: houseForm(over), house_edited: true }), 'ft', { ...V, house: HOUSE });
+  const floor = run({ floor_drop: '-2' });
+  assert.ok(floor.errors.some((e) => /floor drop/i.test(e) && /deck/i.test(e)), floor.errors.join(' | '));
+  assert.equal(floor.venue.house.floor_drop_ft, 0);
+  const ceiling = run({ ceiling: '15' });
+  assert.ok(ceiling.errors.some((e) => /ceiling/i.test(e) && /20\.5 ft/.test(e)), ceiling.errors.join(' | '));
+  assert.ok(ceiling.venue.house.ceiling_ft >= 20.5);
+  const walls = run({ left: '5' });                       // right stays 30: 25 ft apart on a 40 ft stage
+  assert.ok(walls.errors.some((e) => /walls/i.test(e) && /40\.0 ft/.test(e)), walls.errors.join(' | '));
+  assert.equal(walls.errors.filter((e) => /walls/i.test(e)).length, 1, 'one message for the pair');
+  const depth = run({ depth: '0' });
+  assert.ok(depth.errors.some((e) => /depth/i.test(e) && /1\.0 ft/.test(e)), depth.errors.join(' | '));
+  assert.deepEqual(run({ ceiling: '25', floor_drop: '0', depth: '1', left: '-10', right: '30' }).errors, [], 'edge values pass');
+  const m = venueFromForm(form({ width: '12.2', height: '6.1', depth: '9.1', house: houseForm({ ceiling: '5', left: '-9', right: '9', floor_drop: '1', depth: '18' }), house_edited: true }), 'm', { ...V, house: HOUSE });
+  assert.ok(m.errors.some((e) => /ceiling/i.test(e) && e.includes(' m)')), 'rule stated in the form unit: ' + m.errors.join(' | '));
 });
