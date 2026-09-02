@@ -29,6 +29,12 @@
     <label class="header-toggle" title="Show the venue's acting areas on the photo (calibrated scenes)">
       <input type="checkbox" id="show-areas" /> Areas
     </label>
+    <label class="header-toggle" title="Show the stage box (the calibration cube) on the photo">
+      <input type="checkbox" id="show-stage-box" checked /> Stage box
+    </label>
+    <label class="header-toggle" title="Show the house box (walls, floor, ceiling) on the photo">
+      <input type="checkbox" id="show-house-box" checked /> House box
+    </label>
     <button id="refine-mask-btn" type="button" class="refine-toggle">Refine Mask</button>
     <button id="refine-clear-btn" type="button" hidden>Clear points</button>
     <button id="export-btn" type="button">Export PNG</button>
@@ -84,6 +90,7 @@
         <div id="canvas-wrap">
           <canvas id="canvas"></canvas>
           <svg id="areas-overlay" hidden></svg>
+          <svg id="cube-overlay" hidden></svg>
           <div id="handles"></div>
           <div id="refine-overlay" hidden></div>
           <div id="placement-overlay" hidden></div>
@@ -98,7 +105,6 @@
             hidden
           >⤢</button>
           <div id="calib-panel" hidden></div>
-          <div id="calib-overlay" hidden></div>
         </div>
       </div>
       <div class="stage-divider" id="stage-divider"></div>

@@ -251,6 +251,7 @@ export function newState() {
     selectedId: key.id,                   // Key still selected first
     theme: 'dark',
     calibration: null,                    // stage calibration record (+ solved camera) or null
+    calibration_undo: null,               // latest calibration history entry (one Undo survives a reload)
     units: 'ft',                          // display units for feet values: 'ft' | 'm'
   };
   syncLights(state);

@@ -1171,6 +1171,17 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
   border-color: #fc6;
   color: #fc6;
 }
+/* Calibration cube: unapplied draft changes (drag or typed) show as a dot. */
+.calib-badge.is-dirty::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #fc6;
+  vertical-align: middle;
+}
 
 /* ─── Metric position fields in the props pane ─────────────────────────── */
 .metric-pos, .metric-tgt {
@@ -1183,8 +1194,8 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 .metric-pos label, .metric-tgt label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; margin: 3px 0; }
 .metric-pos input, .metric-tgt input { width: 84px; }
 
-/* ─── Stage calibration panel + five-click marking overlay ─────────────── */
-/* Both live inside #canvas-wrap so marker (u, v) maps to the photo exactly. */
+/* ─── Stage calibration panel (calibration cube) ──────────────────────── */
+/* The panel lives inside #canvas-wrap next to the cube overlay. */
 #calib-panel {
   position: absolute;
   top: 12px;
@@ -1202,43 +1213,74 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 }
 #calib-panel[hidden] { display: none !important; }
 #calib-panel h3 { margin: 0 0 4px; font-size: 13px; }
+#calib-panel .cal-help { margin: 0 0 4px; color: var(--text-muted); }
 #calib-panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #calib-panel input[type="number"] { width: 90px; }
+#calib-panel select { max-width: 110px; }
 #calib-panel .cal-units { align-self: flex-start; }
-#calib-panel .cal-prompt {
-  background: var(--accent, #4a7);
-  color: #fff;
-  padding: 6px 8px;
-  border-radius: 4px;
-}
-#calib-panel .cal-errors { margin: 0; padding-left: 16px; color: #f88; }
-#calib-panel .cal-errors:empty { display: none; }
 #calib-panel .cal-warn { color: #fc6; }
+#calib-panel .cal-dirty { color: #fc6; font-weight: 600; }
 #calib-panel .cal-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 #calib-panel button { font-size: 12px; }
+/* Unapplied changes: Apply pulses until the draft is committed or reverted. */
+@keyframes cal-apply-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 204, 102, 0.75); }
+  60% { box-shadow: 0 0 0 7px rgba(255, 204, 102, 0); }
+}
+#calib-panel .cal-apply.is-dirty {
+  border-color: #fc6;
+  color: #fc6;
+  animation: cal-apply-pulse 1.4s ease-out infinite;
+}
 
-#calib-overlay { position: absolute; inset: 0; z-index: 5; cursor: crosshair; }
-#calib-overlay[hidden] { display: none !important; }
-.cal-marker {
+/* ─── Cube overlay: the stage box (and, later, the house box) on the photo ─ */
+/* The SVG never takes pointer events; only its handles and labels do, so the
+ * light handles above keep working. Sits over the areas overlay. */
+#cube-overlay {
   position: absolute;
-  width: 14px;
-  height: 14px;
-  margin: -7px;
-  border-radius: 50%;
-  background: var(--accent, #4a7);
-  border: 2px solid #fff;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  overflow: visible;
+}
+#cube-overlay[hidden], #cube-overlay [hidden] { display: none; }
+#cube-overlay .cube-edge {
+  fill: none;
+  stroke: var(--accent, #4a7);
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+#cube-overlay .cube-edge.is-back { stroke-opacity: 0.55; }
+#cube-overlay .cube-edge.is-side { stroke-opacity: 0.75; }
+#cube-overlay .cube-edge.is-dirty { stroke-dasharray: 6 4; }
+#cube-overlay .cube-handle {
+  fill: var(--accent, #4a7);
+  stroke: #fff;
+  stroke-width: 2;
+  pointer-events: all;
   cursor: grab;
   touch-action: none;
-  box-sizing: border-box;
 }
-.cal-marker.is-dragging { cursor: grabbing; }
-.cal-marker::after {
-  content: attr(data-key);
+#cube-overlay .cube-handle.is-dragging { cursor: grabbing; }
+#cube-overlay .cube-handle.is-clamped { fill: #f66; }
+#cube-overlay .cube-label {
+  fill: #fff;
+  font: 600 12px system-ui, sans-serif;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.85);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  dominant-baseline: middle;
+  pointer-events: all;
+  cursor: text;
+}
+/* In-place edit of an edge label: an input placed over the label. */
+.cube-label-input {
   position: absolute;
-  top: 14px;
-  left: 8px;
-  white-space: nowrap;
-  font-size: 11px;
-  color: #fff;
-  text-shadow: 0 0 3px #000, 0 0 3px #000;
+  z-index: 7;
+  width: 64px;
+  font-size: 12px;
+  transform: translate(-50%, -50%);
 }

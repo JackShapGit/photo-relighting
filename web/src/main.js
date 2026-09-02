@@ -44,8 +44,12 @@ import {
   solveRecord, syncLightFromFeet, syncLightFromEngine, migrateLightsToFeet, clearMetric,
   syncLightsFromEngineEdits, clampEnginePosition,
 } from './metric/light-metric.js';
-import { toDisplay } from './metric/units.js';
+import { toDisplay, parseLength } from './metric/units.js';
 import { mountCalibrationPanel } from './metric/calibration-panel.js';
+import { mountCubeOverlay } from './metric/cube-overlay-2d.js';
+import { createDraftState, reduce as reduceDraft, serializeUndo, hydrateUndo } from './metric/calibration-draft.js';
+import { guessCamera, marksFromCamera, clampStageDrag, applyHandleDrag, clampHouse } from './metric/cube-geometry.js';
+import { solveCamera, validateMarks } from './metric/calibration.js';
 import { mountPlacement2D } from './placement-pane-2d.js';
 
 const state = newState();
@@ -55,6 +59,13 @@ let handlesAPI = null;
 let depthSampler = null;     // rebuilt on each scene load; used by 2D placement
 let placement = null;        // created once below
 let placement2D = null;      // 2D pane placement adapter (assigned below)
+let cubeOverlay = null;      // calibration cube on the photo (mounted below)
+let calibPanel = null;       // calibration panel (mounted below)
+// Calibration cube draft/applied/history state (reducer in calibration-draft.js).
+// main.js owns it: the overlay and the panel read it, every change goes
+// through dispatchDraft, and its latest history entry persists as
+// state.calibration_undo.
+state.cal_draft = createDraftState(null);
 // Suppress auto-save until the initial scene has been loaded — otherwise the
 // default in-memory state would overwrite the just-loaded scene's data on
 // the very first change. Set true at the end of applyScene().
@@ -98,6 +109,7 @@ function serializeSceneState() {
     shadowStyle: state.shadowStyle,
     selectedId: state.selectedId,
     calibration: state.calibration ? stripCamera(state.calibration) : null,
+    calibration_undo: state.calibration_undo ?? null,   // one calibration Undo survives a reload
     units: state.units || 'ft',
     // Venue reference (Spec 2): the id plus an embedded copy so a deleted or
     // unreachable venue never breaks the scene. state.venue itself is live.
@@ -479,6 +491,8 @@ async function applyScene(scene) {
     state.assetUrls = null;
     state.width = state.height = 0;
     depthSampler = null;
+    state.calibration_undo = null;
+    state.cal_draft = createDraftState(null);
     initialized = true;     // allow auto-save once the user fixes it
     return;
   }
@@ -518,6 +532,10 @@ async function applyScene(scene) {
   const calRecord = mergeVenueIntoCalibration(s.calibration || null, state.venue);
   state.calibration = calRecord ? solveRecord(calRecord, state.height / state.width) : null;
   if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
+  // Calibration cube: the draft mirrors the applied record (default pose when
+  // there is none); the persisted history entry seeds one Undo.
+  state.calibration_undo = s.calibration_undo ?? null;
+  resetCalibrationDraft(state.calibration_undo);
   // Fixtures follow their venue: a position edited since the last load
   // moves the lights hung on it (spec: Venue editor).
   if (rigMode(state)) syncAllFixtures(state.lights, state.venue, state.calibration);
@@ -741,6 +759,7 @@ function adoptVenue(v, { missing = false } = {}) {
     syncAllFixtures(state.lights, state.venue, state.calibration);
     document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
   }
+  syncDraftWithApplied();
   structuralEdit();
   handlesAPI?.reposition();
   updateBadge();
@@ -811,6 +830,7 @@ async function applyVenueEdit(venue) {
   venue = prepareVenueForSave(venue);
   state.venue = venue;
   state.venue_snapshot = venue;
+  syncDraftWithApplied();
   syncAllFixtures(state.lights, state.venue, state.calibration);
   structuralEdit();
   updateBadge();
@@ -1194,6 +1214,7 @@ function applyCalibration(record) {
   state.calibration = record ? solveRecord(record, state.height / state.width) : null;
   if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
   else for (const L of state.lights) { clearMetric(L); clampEnginePosition(L); }   // keep FOH lights reachable
+  syncDraftWithApplied();     // cube: a record installed from outside the panel (specs, console) resets the draft
   document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
   redrawAndSave();
   handlesAPI?.reposition();   // edge arrows / hidden handles follow the calibration state
@@ -1247,6 +1268,7 @@ function updateBadge() {
   calibrateBtn.textContent = formatBadge(rec);
   calibrateBtn.classList.toggle('is-calibrated', !!rec);
   calibrateBtn.classList.toggle('is-no-fit', !!rec && !rec.depth_fit);
+  calibrateBtn.classList.toggle('is-dirty', !!state.cal_draft?.dirty);   // unapplied cube changes
   let title = !rec
     ? 'Calibrate the stage so lights are placed in real-world units'
     : rec.depth_fit ? 'Stage calibration (click to edit)' : NO_FIT_TITLE;
@@ -1282,6 +1304,7 @@ unitToggle?.addEventListener('click', (e) => {
 // its light primitives.
 document.addEventListener('relight:calibration', async (e) => {
   updateBadge();
+  refreshCalibrationUI();
   refreshProps();
   setLeftTab(rigMode(state) ? 'rig' : 'lights');   // Rig opens with a calibrated scene
   setVenue3D(state.venue, state.units);              // overlay built with the stage on the next load
@@ -1290,7 +1313,7 @@ document.addEventListener('relight:calibration', async (e) => {
   syncLightsToScene(state.lights, state.selectedId);
   frameStage3D();
 });
-document.addEventListener('relight:units', (e) => { setUnits3D(e.detail); areasOverlay?.render(); });
+document.addEventListener('relight:units', (e) => { setUnits3D(e.detail); areasOverlay?.render(); cubeOverlay?.render(); });
 
 // ─── 2D "Areas" overlay (Spec 2): acting-area cells projected on the photo ─
 const areasOverlay = mountAreasOverlay({
@@ -1302,17 +1325,273 @@ window.addEventListener('resize', () => areasOverlay?.render());
 window.__areasOverlay = areasOverlay;   // console / spec hook
 applyUnits(state.units);
 
-// ─── Calibration panel (five-click marking) ───────────────────────────────
-const calibPanel = mountCalibrationPanel({
-  panelEl: document.getElementById('calib-panel'),
-  overlayEl: document.getElementById('calib-overlay'),
+// ─── Calibration cube: draft state, preview camera, photo overlay, panel ──
+// The stored record stays the single source of truth. Drags and typing edit
+// a draft (marks, stage dims, house) that is re-solved into a preview camera
+// for the overlay and the panel; Apply commits through applyCalibration and
+// a venue save, Revert discards, Undo/Redo walk a per-scene history whose
+// latest entry persists as state.calibration_undo.
+const SHOW_STAGE_BOX_KEY = 'photo-relight:show-stage-box';
+const SHOW_HOUSE_BOX_KEY = 'photo-relight:show-house-box';
+const DEFAULT_DIMS = { width_ft: 40, height_ft: 20, depth_ft: 30 };
+const FEET_FIELDS = ['position_ft', 'target_ft', 'direction_ft', 'endpoint_a_ft', 'endpoint_b_ft'];
+const ENGINE_FIELDS = ['position', 'target', 'direction', 'endpoint_a', 'endpoint_b'];
+const cloneJson = (v) => (v == null ? null : JSON.parse(JSON.stringify(v)));
+const imageAspect = () => (state.width && state.height ? state.height / state.width : 0.75);
+let previewCache = { key: null, cam: null };
+
+// Stage dimensions for the draft: the venue's (mirrored into the record), else
+// the record's, else the spec's 40 × 20 × 30 starting point.
+function sceneDims() {
+  const src = state.venue || state.calibration;
+  return src && Number.isFinite(src.width_ft)
+    ? { width_ft: src.width_ft, height_ft: src.height_ft, depth_ft: src.depth_ft }
+    : { ...DEFAULT_DIMS };
+}
+
+/** The reducer's "applied" entry for the live scene: marks from the record, dims and house from the venue. */
+function appliedFromState() {
+  const cal = state.calibration;
+  if (!cal?.marks) return null;
+  return { marks: cloneJson(cal.marks), dims: sceneDims(), house: cloneJson(state.venue?.house) ?? null };
+}
+
+// A draft without marks (uncalibrated scene, or undone/cleared to none) shows
+// the default pose: the box projected through the guessed camera.
+function normalizeDraft(S) {
+  if (!state.width || !state.height) return S;
+  const d = S.draft;
+  if (d?.marks && d.dims) return S;
+  const dims = d?.dims || sceneDims();
+  const house = d?.house || cloneJson(state.venue?.house) || defaultHouse(dims);
+  const marks = d?.marks || marksFromCamera(guessCamera(dims, imageAspect()), dims);
+  return { ...S, draft: { marks, dims, house } };
+}
+
+function resetCalibrationDraft(undoEntry = null) {
+  state.cal_draft = normalizeDraft(hydrateUndo(createDraftState(appliedFromState()), undoEntry));
+  previewCache = { key: null, cam: null };
+}
+
+function dispatchDraft(action) {
+  state.cal_draft = normalizeDraft(reduceDraft(state.cal_draft, action));
+  state.calibration_undo = serializeUndo(state.cal_draft);
+  refreshCalibrationUI();
+}
+
+// After applyCalibration or a venue change: the draft's applied entry follows
+// the live record (a no-op when Apply/Undo already put them in step).
+function syncDraftWithApplied() {
+  const applied = appliedFromState();
+  const S = state.cal_draft;
+  if (JSON.stringify(applied) === JSON.stringify(S.applied)) return;
+  state.cal_draft = normalizeDraft({ ...S, applied, draft: cloneJson(applied), dirty: false });
+  refreshCalibrationUI();
+}
+
+function refreshCalibrationUI() {
+  refreshCubeToggles();
+  cubeOverlay?.render();
+  calibPanel?.render();
+  updateBadge();
+}
+
+// Preview camera: the draft's marks and dims solved once per change.
+function previewCamera() {
+  const d = state.cal_draft?.draft;
+  if (!d?.marks || !d.dims || !state.width) return null;
+  const key = JSON.stringify([d.marks, d.dims, imageAspect()]);
+  if (previewCache.key !== key) {
+    const rec = { ...d.dims, marks: d.marks };
+    let cam = null;
+    if (validateMarks(rec).ok) {
+      cam = solveCamera(rec, imageAspect());
+      if (![cam.f, cam.dist_ft, cam.height_ft, cam.va_h, cam.k_y].every(Number.isFinite)) cam = null;
+    }
+    previewCache = { key, cam };
+  }
+  return previewCache.cam;
+}
+
+// ── toggles: each box remembered separately; both default to on while the
+// scene is uncalibrated or the panel is open (the box is the calibration UI
+// then), the stored value rules otherwise. A click while the default applies
+// overrides it for the session and is remembered too.
+const stageBoxToggle = document.getElementById('show-stage-box');
+const houseBoxToggle = document.getElementById('show-house-box');
+const BOX_TOGGLES = [['stage', stageBoxToggle, SHOW_STAGE_BOX_KEY], ['house', houseBoxToggle, SHOW_HOUSE_BOX_KEY]];
+let boxOverride = { stage: null, house: null };
+let boxesWereForced = null;
+const readBoxToggle = (key) => { try { return localStorage.getItem(key) !== '0'; } catch { return true; } };
+const boxesForced = () => !state.calibration || !!calibPanel?.isOpen();
+function boxesShown() {
+  const forced = boxesForced();
+  if (forced !== boxesWereForced) { boxOverride = { stage: null, house: null }; boxesWereForced = forced; }
+  const shown = {};
+  for (const [kind, , key] of BOX_TOGGLES) shown[kind] = forced ? (boxOverride[kind] ?? true) : readBoxToggle(key);
+  return shown;
+}
+function refreshCubeToggles() {
+  const shown = boxesShown();
+  for (const [kind, el] of BOX_TOGGLES) if (el) el.checked = shown[kind];
+}
+for (const [kind, el, key] of BOX_TOGGLES) {
+  el?.addEventListener('change', () => {
+    boxOverride[kind] = el.checked;
+    try { localStorage.setItem(key, el.checked ? '1' : '0'); } catch {}
+    cubeOverlay?.render();
+  });
+}
+
+// ── overlay edits → draft ──
+function onCubeDrag(kind, key, uv) {
+  if (kind !== 'stage') return false;          // house handles: Task 4
+  const d = state.cal_draft?.draft;
+  if (!d?.marks) return false;
+  const clamped = clampStageDrag(d.marks, key, uv);
+  // The top handle only moves vertically, so only v counts as a clamp there.
+  const wasClamped = (key !== 'top' && Math.abs(clamped[0] - uv[0]) > 1e-6) || Math.abs(clamped[1] - uv[1]) > 1e-6;
+  dispatchDraft({ type: 'edit', patch: { marks: applyHandleDrag(d.marks, key, clamped) } });
+  return wasClamped;
+}
+function onCubeLabelEdit(kind, field, text) {
+  if (kind !== 'stage') return;                // house labels: Task 4
+  const v = parseLength(text, state.units);
+  if (!(v > 0)) return;
+  dispatchDraft({ type: 'edit', patch: { dims: { [field]: v } } });
+}
+
+cubeOverlay = mountCubeOverlay({
+  overlayEl: document.getElementById('cube-overlay'),
   canvasWrapEl: document.getElementById('canvas-wrap'),
+  getDraft: () => state.cal_draft?.draft || null,
+  getPreviewCamera: previewCamera,
+  getDims: () => state.cal_draft?.draft?.dims || null,
+  getHouse: () => state.cal_draft?.draft?.house || null,
+  getUnits: () => state.units,
+  isShown: boxesShown,
+  isDirty: () => !!state.cal_draft?.dirty,
+  onDrag: onCubeDrag,
+  onLabelEdit: onCubeLabelEdit,
+});
+window.addEventListener('resize', () => cubeOverlay?.render());
+
+// ── history snapshots: what Undo restores (calibration, venue dims/house, fixture coordinates) ──
+function historySnapshot() {
+  const v = state.venue;
+  return {
+    calibration: state.calibration ? stripCamera(state.calibration) : null,
+    venue: v ? {
+      dims: { width_ft: v.width_ft, height_ft: v.height_ft, depth_ft: v.depth_ft },
+      house: cloneJson(v.house) ?? null,
+      default_height_ref: v.default_height_ref || 'deck',
+    } : null,
+    fixtures: state.lights.map((L) => {
+      const f = { id: L.id };
+      for (const k of [...FEET_FIELDS, ...ENGINE_FIELDS]) f[k] = cloneJson(L[k]) ?? null;
+      return f;
+    }),
+  };
+}
+function restoreFixtureFields(fixtures) {
+  if (!Array.isArray(fixtures)) return;
+  const byId = new Map(fixtures.map((f) => [f.id, f]));
+  for (const L of state.lights) {
+    const f = byId.get(L.id);
+    if (!f) continue;
+    for (const k of FEET_FIELDS) { if (k in f) { if (f[k] == null) delete L[k]; else L[k] = cloneJson(f[k]); } }
+    for (const k of ENGINE_FIELDS) {
+      if (!(k in f)) continue;
+      if (f[k] == null && (k === 'position' || k === 'direction')) continue;   // never blank a required engine field
+      L[k] = cloneJson(f[k]);
+    }
+  }
+}
+
+// A house that satisfies the venue rules for these stage dims: an estimated
+// house is re-derived from them, an edited one is clamped (walls at least a
+// stage width apart, ceiling above the opening).
+function houseForDims(house, dims) {
+  if (!house || house.estimated || !Number.isFinite(house.left_wall_ft)) return defaultHouse(dims);
+  return clampHouse(house, dims, { left_wall_ft: house.left_wall_ft });
+}
+
+// Venue write for Apply: dims from the record, house and default reference
+// from the draft. Runs before applyCalibration so the mirrored dims are fresh.
+// A scene without a venue gets one here (rather than in syncVenueWithCalibration).
+async function saveVenueForCalibration(record, venuePatch) {
+  if (!state.sceneId) return;
+  const dims = { width_ft: record.width_ft, height_ft: record.height_ft, depth_ft: record.depth_ft };
+  const house = houseForDims(venuePatch?.house || state.venue?.house || null, dims);
+  const default_height_ref = venuePatch?.default_height_ref || state.venue?.default_height_ref || 'deck';
+  try {
+    if (!state.venue_id) {
+      const v = withHouse(await createVenue({ ...venueFromCalibration(state.sceneName, record), house, default_height_ref }));
+      state.venue_id = v.id; state.venue = v; state.venue_snapshot = v; state.venueMissing = false;
+    } else if (state.venue) {
+      const next = prepareVenueForSave({ ...state.venue, ...dims, house, default_height_ref });
+      const v = state.venueMissing ? next : withHouse(await updateVenue(state.venue_id, next));
+      state.venue = v; state.venue_snapshot = v;
+    }
+  } catch (e) {
+    console.warn('venue save failed', e);
+    setStatus('Venue save failed');
+  }
+}
+async function restoreVenueFromEntry(entry) {
+  if (!entry || !state.venue) return;    // a scene that had no venue keeps the one it gained (never orphan it)
+  const next = prepareVenueForSave({
+    ...state.venue, ...entry.dims,
+    house: entry.house || state.venue.house, default_height_ref: entry.default_height_ref || 'deck',
+  });
+  try {
+    const v = (state.venue_id && !state.venueMissing) ? withHouse(await updateVenue(state.venue_id, next)) : next;
+    state.venue = v; state.venue_snapshot = v;
+  } catch (e) {
+    console.warn('venue restore failed', e);
+    setStatus('Venue save failed');
+  }
+}
+
+// ── Apply / Undo / Redo / Clear (the panel's buttons) ──
+async function commitCalibration(record, venuePatch) {
+  const snapshot = historySnapshot();                // the state being left
+  dispatchDraft({ type: 'apply', snapshot });
+  await saveVenueForCalibration(record, venuePatch);
+  applyCalibration(record);
+  structuralEdit();
+}
+async function restoreCalibrationEntry(entry, type) {
+  if (!entry) return;
+  const snapshot = historySnapshot();                // undo: fills the redo slot; redo: back onto the history
+  dispatchDraft({ type, snapshot });
+  restoreFixtureFields(entry.fixtures);
+  await restoreVenueFromEntry(entry.venue);
+  applyCalibration(entry.calibration ? cloneJson(entry.calibration) : null);
+  structuralEdit();
+}
+async function clearCalibration() {
+  const snapshot = historySnapshot();
+  dispatchDraft({ type: 'clear', snapshot, draft: null });   // normalizeDraft installs the default pose
+  applyCalibration(null);
+  structuralEdit();
+}
+
+calibPanel = mountCalibrationPanel({
+  panelEl: document.getElementById('calib-panel'),
   getState: () => state,
-  sampleDepth: (u, v) => depthSampler?.sample(u, v) ?? NaN,
+  getDraftState: () => state.cal_draft,
+  getPreviewCamera: previewCamera,
+  dispatch: dispatchDraft,
+  onApplyCommit: commitCalibration,
+  onUndoRestore: (entry) => restoreCalibrationEntry(entry, 'undo'),
+  onRedoRestore: (entry) => restoreCalibrationEntry(entry, 'redo'),
+  onClearCommit: clearCalibration,
+  getUnits: () => state.units,
   getVenue: () => state.venue || null,   // prefill + note whenever the scene references a venue
-  onApply: applyCalibration,
-  onClear: () => applyCalibration(null),
+  sampleDepth: (u, v) => depthSampler?.sample(u, v) ?? NaN,
   onCrossCheck: crossCheckCalibration,
+  onToggle: () => refreshCalibrationUI(),   // the boxes default to shown while the panel is open
 });
 calibrateBtn?.addEventListener('click', () => {
   if (!state.sessionId) return;
@@ -1321,3 +1600,8 @@ calibrateBtn?.addEventListener('click', () => {
   if (rigMode(state)) { openVenueEditorForScene(); return; }
   calibPanel?.open();
 });
+// Console / spec hooks for the cube.
+window.__calDraft = () => state.cal_draft;
+window.__calPreview = () => previewCamera();
+window.__cubeOverlay = cubeOverlay;
+window.__calPanel = calibPanel;

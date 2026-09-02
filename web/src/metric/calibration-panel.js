@@ -1,19 +1,22 @@
-// Stage calibration panel: stage dimensions + five-click marking on the photo.
+// Stage calibration panel (calibration cube spec): the numbers behind the
+// draggable stage box on the photo. Stage dimensions are typed here and go
+// to the draft (the box on the photo never moves when a dimension changes;
+// the solve does); the buttons commit or discard the draft and walk the
+// undo history. The five-click marking flow is gone — the marks are the
+// box's handles.
 //
-// The panel and the marking overlay live inside #canvas-wrap so marker
-// positions map to photo (u, v) exactly the way #placement-overlay does:
-// u = (clientX - rect.left) / rect.width, v likewise (see placement-pane-2d.js).
-import { createMarking, MARK_ORDER, MARK_LABELS } from './marking.js';
-import { validateMarks, solveCamera, fitDepth } from './calibration.js';
+// The panel lives inside #canvas-wrap (as before) but owns no overlay: the
+// box is cube-overlay-2d.js, the draft/history reducer is
+// calibration-draft.js, and main.js owns both plus the preview camera.
+import { validateMarks, fitDepth } from './calibration.js';
 import { toDisplay, fromDisplay } from './units.js';
 
-const SHORT = { lipL: 'lip L', lipR: 'lip R', top: 'top', backL: 'back L', backR: 'back R' };
-const DONE_PROMPT = 'All five marks set. Adjust by dragging, then Apply.';
 const CROSS_CHECK_WARN_PCT = 20;
+const HEIGHT_WARN_PCT = 10;
+const PERSPECTIVE_WARN = 0.9;
+const HEIGHT_REFS = [['deck', 'Deck'], ['house_floor', 'House floor'], ['ceiling', 'Ceiling']];
 const crossCheckMessage = (pct) =>
-  `Metric depth model disagrees with your marks by ${Math.round(pct)}%; recheck the lip and back-line marks.`;
-
-const isTextField = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
+  `Metric depth model disagrees with your marks by ${Math.round(pct)}%; recheck the lip and back-line handles.`;
 
 /**
  * Dimensions to show when the panel opens: the calibration record's when it
@@ -42,28 +45,52 @@ export function readDim(text, shown, exact, units) {
   return Number.isFinite(v) ? fromDisplay(v, units) : NaN;
 }
 
+/** Live warnings for a draft: its preview camera and (when a sampler is given) the depth fit. */
+export function draftWarnings(cam, depthFit) {
+  const warns = [];
+  if (!cam) return warns;
+  if (cam.height_check_pct > HEIGHT_WARN_PCT) {
+    warns.push(`Photo implies an opening height ${cam.height_check_pct.toFixed(0)}% different from what you entered; check the top handle.`);
+  }
+  if (cam.perspective_ratio > PERSPECTIVE_WARN) {
+    warns.push('Stage depth is small relative to the camera distance, so upstage distances are sensitive to the back-line handles. Place them carefully.');
+  }
+  if (depthFit === null) {
+    warns.push('Depth map has no usable relief between lip and back line; upstage distances fall back to a linear estimate.');
+  }
+  return warns;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 /**
  * @param {object} o
- * @param {HTMLElement} o.panelEl       #calib-panel (inside #canvas-wrap)
- * @param {HTMLElement} o.overlayEl     #calib-overlay (inside #canvas-wrap, inset 0)
- * @param {HTMLElement} o.canvasWrapEl  #canvas-wrap (for the photo rect)
- * @param {() => object} o.getState     returns main.js state (calibration, units, width, height)
- * @param {(u:number,v:number)=>number} o.sampleDepth  depth at a photo coordinate (NaN if unknown)
- * @param {(record:object)=>void} o.onApply
- * @param {()=>void} o.onClear
- * @param {(record:object)=>Promise<{available:boolean, median_error_pct:number|null}|null>} [o.onCrossCheck]
- *   optional server-side metric-depth cross-check, fired after onApply. The
- *   caller owns the record (persisting depth_check); the panel only shows the
- *   warning when the model is available and disagrees by more than 20%.
- *   Every failure (offline, timeout, model missing) is silent.
+ * @param {HTMLElement} o.panelEl         #calib-panel
+ * @param {() => object} o.getState       main.js state (calibration, width, height, units)
+ * @param {() => object} o.getDraftState  the reducer state { applied, draft, history, redo, dirty }
+ * @param {() => object|null} o.getPreviewCamera  camera solved from the draft (null when it cannot be)
+ * @param {(action) => void} o.dispatch   reducer dispatch (used for `edit` and `revert`)
+ * @param {(record, venuePatch) => void|Promise} o.onApplyCommit  Apply: the draft's record + { dims, house, default_height_ref }
+ * @param {(entry) => void|Promise} o.onUndoRestore   Undo: the latest history entry
+ * @param {(entry) => void|Promise} o.onRedoRestore   Redo: the redo-slot entry
+ * @param {() => void|Promise} o.onClearCommit          Clear
+ * @param {() => string} o.getUnits       'ft' | 'm' (display)
+ * @param {() => object|null} [o.getVenue]
+ * @param {(u, v) => number} [o.sampleDepth]  depth at a photo coordinate (for the live "no fit" warning and the applied record)
+ * @param {(record) => Promise} [o.onCrossCheck]  server-side cross-check after Apply (silent on failure)
+ * @param {(open: boolean) => void} [o.onToggle]   called after open()/close()
  */
 export function mountCalibrationPanel({
-  panelEl, overlayEl, canvasWrapEl, getState, sampleDepth, onApply, onClear, onCrossCheck = null, getVenue = null,
+  panelEl, getState, getDraftState, getPreviewCamera, dispatch, onApplyCommit, onUndoRestore, onRedoRestore, onClearCommit,
+  getUnits, getVenue = null, sampleDepth = null, onCrossCheck = null, onToggle = null,
 }) {
-  if (!panelEl || !overlayEl) return null;
+  if (!panelEl) return null;
 
   panelEl.innerHTML = `
     <h3>Stage calibration</h3>
+    <p class="cal-help">Drag the box's corners on the photo to fit the stage; type its real size here.</p>
     <label>Width <input class="cal-w" type="number" step="0.1" min="0" /></label>
     <label>Height <input class="cal-h" type="number" step="0.1" min="0" /></label>
     <label>Depth <input class="cal-d" type="number" step="0.1" min="0" /></label>
@@ -72,27 +99,36 @@ export function mountCalibrationPanel({
       <button type="button" data-unit="ft" aria-pressed="true">ft</button>
       <button type="button" data-unit="m" aria-pressed="false">m</button>
     </div>
-    <button type="button" class="cal-mark">Mark on photo</button>
-    <div class="cal-prompt" hidden></div>
-    <ul class="cal-errors"></ul>
+    <div class="cal-house" hidden></div>
+    <label>Default height reference
+      <select class="cal-href">${HEIGHT_REFS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+    </label>
     <div class="cal-warn" hidden></div>
+    <div class="cal-dirty" hidden>Unapplied changes — Apply to commit, Revert to discard.</div>
     <div class="cal-actions">
       <button type="button" class="cal-apply">Apply</button>
+      <button type="button" class="cal-revert">Revert</button>
+      <button type="button" class="cal-undo" title="Undo the last Apply">Undo</button>
+      <button type="button" class="cal-redo" title="Redo the undone Apply">Redo</button>
       <button type="button" class="cal-clear">Clear calibration</button>
       <button type="button" class="cal-close">Close</button>
     </div>`;
 
   const $ = (sel) => panelEl.querySelector(sel);
   const wIn = $('.cal-w'), hIn = $('.cal-h'), dIn = $('.cal-d');
-  const promptEl = $('.cal-prompt'), errorsEl = $('.cal-errors'), warnEl = $('.cal-warn');
-  const markBtn = $('.cal-mark');
+  const warnEl = $('.cal-warn');
+  const FIELDS = [[wIn, 'width_ft'], [hIn, 'height_ft'], [dIn, 'depth_ft']];
 
   let units = 'ft';
-  let marking = createMarking({});
-  let markingActive = false;
-  const markerEls = new Map();   // key -> div.cal-marker
+  // What the dimension fields currently show (exact feet + text), so an
+  // untouched field never re-rounds a value and a unit toggle keeps it exact.
+  let prefill = { width_ft: null, height_ft: null, depth_ft: null };
+  let shown = { width_ft: '', height_ft: '', depth_ft: '' };
+  let persistedWarning = null;   // cross-check warning that survives reopen until the next Apply
 
-  // ── units (panel-local display; the record stores feet) ──
+  function draft() { return getDraftState?.()?.draft || null; }
+
+  // ── units (panel-local display; the draft stores feet) ──
   function setUnits(next, convert = true) {
     const prev = units;
     units = next === 'm' ? 'm' : 'ft';
@@ -100,12 +136,10 @@ export function mountCalibrationPanel({
       b.setAttribute('aria-pressed', b.dataset.unit === units ? 'true' : 'false');
     }
     if (convert && prev !== units) {
-      const keys = { [wIn.className]: 'width_ft', [hIn.className]: 'height_ft', [dIn.className]: 'depth_ft' };
-      for (const el of [wIn, hIn, dIn]) {
-        const key = keys[el.className];
+      for (const [el, key] of FIELDS) {
         const untouched = el.value === shown[key] && prefill[key] != null;
         const v = parseFloat(el.value);
-        if (untouched) el.value = toDisplay(prefill[key], units).toFixed(1);       // exact, not re-rounded
+        if (untouched) el.value = toDisplay(prefill[key], units).toFixed(1);
         else if (Number.isFinite(v)) el.value = toDisplay(fromDisplay(v, prev), units).toFixed(1);
         if (untouched) shown[key] = el.value;
       }
@@ -116,170 +150,16 @@ export function mountCalibrationPanel({
     if (b) setUnits(b.dataset.unit);
   });
 
-  // ── messages ──
-  let warnings = [];
-  function showErrors(list) {
-    errorsEl.innerHTML = list.map((m) => `<li>${escapeHtml(m)}</li>`).join('');
-  }
-  function showWarnings(list) {
-    warnings = list.slice();
-    warnEl.hidden = warnings.length === 0;
-    warnEl.innerHTML = warnings.map((m) => `<div>${escapeHtml(m)}</div>`).join('');
-  }
-  function addWarning(msg) { showWarnings([...warnings, msg]); }
-
-  // ── metric cross-check (async, silent on every failure) ──
-  let checkSeq = 0;
-  function crossCheck(rec) {
-    if (typeof onCrossCheck !== 'function') return;
-    const seq = ++checkSeq;
-    let p;
-    try { p = Promise.resolve(onCrossCheck(rec)); } catch { return; }
-    p.then((res) => {
-      if (seq !== checkSeq) return;          // a newer Apply or Clear superseded this check
-      if (!res || !res.available || !(res.median_error_pct > CROSS_CHECK_WARN_PCT)) return;
-      addWarning(crossCheckMessage(res.median_error_pct));
-    }).catch(() => {});
-  }
-  function updatePrompt() {
-    if (!markingActive) { promptEl.hidden = true; return; }
-    promptEl.hidden = false;
-    promptEl.textContent = marking.done ? DONE_PROMPT : MARK_LABELS[marking.current];
-  }
-
-  // ── markers ──
-  function uvFromEvent(e) {
-    const r = overlayEl.getBoundingClientRect();
-    const u = (e.clientX - r.left) / r.width;
-    const v = (e.clientY - r.top) / r.height;
-    return [Math.min(1, Math.max(0, u)), Math.min(1, Math.max(0, v))];
-  }
-  function placeMarker(el, [u, v]) {
-    el.style.left = `${u * 100}%`;
-    el.style.top = `${v * 100}%`;
-  }
-  function addMarker(key, uv) {
-    let el = markerEls.get(key);
-    if (!el) {
-      el = document.createElement('div');
-      el.className = 'cal-marker';
-      el.dataset.key = SHORT[key] || key;
-      el.dataset.mark = key;
-      el.title = MARK_LABELS[key];
-      el.addEventListener('pointerdown', (e) => startDrag(e, key, el));
-      overlayEl.appendChild(el);
-      markerEls.set(key, el);
-    }
-    placeMarker(el, uv);
-  }
-  function removeMarker(key) {
-    const el = markerEls.get(key);
-    if (el) { el.remove(); markerEls.delete(key); }
-  }
-  function renderMarkers() {
-    for (const key of [...markerEls.keys()]) if (!(key in marking.marks)) removeMarker(key);
-    for (const key of MARK_ORDER) if (marking.marks[key]) addMarker(key, marking.marks[key]);
-  }
-  function startDrag(e, key, el) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();            // the overlay must not treat this as a new mark
-    el.setPointerCapture?.(e.pointerId);
-    el.classList.add('is-dragging');
-    const move = (ev) => {
-      const uv = uvFromEvent(ev);
-      marking.marks[key] = uv;
-      placeMarker(el, uv);
-    };
-    const up = (ev) => {
-      el.removeEventListener('pointermove', move);
-      el.removeEventListener('pointerup', up);
-      el.removeEventListener('pointercancel', up);
-      el.classList.remove('is-dragging');
-      if (el.hasPointerCapture?.(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
-    };
-    el.addEventListener('pointermove', move);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
-  }
-
-  // ── marking mode ──
-  function onOverlayPointerDown(e) {
-    if (e.button !== 0 || e.target !== overlayEl) return;
-    if (marking.done) return;
-    e.preventDefault();
-    const uv = uvFromEvent(e);
-    const key = marking.next(uv[0], uv[1]);
-    if (key) addMarker(key, uv);
-    updatePrompt();
-  }
-  function onKeyDown(e) {
-    if (!markingActive || isTextField(e.target)) return;
-    if (e.key !== 'Escape' && e.key !== 'Backspace') return;
-    // Capture-phase listener: swallow the key entirely so the tree's
-    // Delete/Backspace shortcut (which deletes the selected light behind a
-    // confirm dialog) and the placement/3D Escape handlers never see it.
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    if (e.key === 'Escape') { marking.cancel(); renderMarkers(); exitMarking(); }
-    else { marking.undo(); renderMarkers(); updatePrompt(); }
-  }
-  function startMarking() {
-    markingActive = true;
-    overlayEl.hidden = false;
-    overlayEl.classList.add('is-marking');
-    renderMarkers();
-    updatePrompt();
-    markBtn.textContent = 'Done marking';
-    document.addEventListener('keydown', onKeyDown, true);
-  }
-  function exitMarking() {
-    markingActive = false;
-    overlayEl.hidden = true;
-    overlayEl.classList.remove('is-marking');
-    markBtn.textContent = 'Mark on photo';
-    updatePrompt();
-    document.removeEventListener('keydown', onKeyDown, true);
-  }
-  overlayEl.addEventListener('pointerdown', onOverlayPointerDown);
-  markBtn.addEventListener('click', () => (markingActive ? exitMarking() : startMarking()));
-
-  // ── open / close / apply / clear ──
-  // What the dimension fields were prefilled with (exact feet and the shown
-  // text), so an untouched field applies the exact value.
-  let prefill = { width_ft: null, height_ft: null, depth_ft: null };
-  let shown = { width_ft: '', height_ft: '', depth_ft: '' };
-  function open() {
-    const st = getState();
-    const rec = st.calibration;
-    setUnits(rec?.units || st.units || 'ft', false);
-    // Spec 2: the dimensions belong to the scene's venue (shared by every
-    // scene that uses it): prefill from it before the first Apply, and Apply
-    // writes through only what the user actually changed.
-    const venue = typeof getVenue === 'function' ? getVenue() : null;
-    const dims = panelDims(rec, venue);
+  function fillDims() {
+    const d = draft();
+    const dims = d?.dims || panelDims(getState().calibration, typeof getVenue === 'function' ? getVenue() : null);
     prefill = { width_ft: dims.width_ft, height_ft: dims.height_ft, depth_ft: dims.depth_ft };
-    const fill = (el, key) => {
+    for (const [el, key] of FIELDS) {
+      if (document.activeElement === el) continue;      // do not clobber a field being typed in
       const ft = prefill[key];
       el.value = ft != null ? toDisplay(ft, units).toFixed(1) : '';
       shown[key] = el.value;
-    };
-    fill(wIn, 'width_ft'); fill(hIn, 'height_ft'); fill(dIn, 'depth_ft');
-    const noteEl = $('.cal-note');
-    noteEl.hidden = !venue;
-    noteEl.textContent = venue ? `Dimensions belong to venue ${venue.name} (shared by its scenes)` : '';
-    marking = createMarking(rec?.marks || {});
-    showErrors([]);
-    // A persisted cross-check warning stays visible on reopen until re-Apply.
-    const dc = rec?.depth_check;
-    showWarnings(dc?.warned && dc.median_error_pct > CROSS_CHECK_WARN_PCT ? [crossCheckMessage(dc.median_error_pct)] : []);
-    panelEl.hidden = false;
-    // Existing marks are shown right away so they can be adjusted.
-    if (Object.keys(marking.marks).length) startMarking(); else exitMarking();
-  }
-  function close() {
-    exitMarking();
-    panelEl.hidden = true;
+    }
   }
   function readDims() {
     return {
@@ -288,49 +168,138 @@ export function mountCalibrationPanel({
       depth_ft: readDim(dIn.value, shown.depth_ft, prefill.depth_ft, units),
     };
   }
-  function apply() {
-    const dims = readDims();
+
+  // Typing a dimension changes the solve, never the box: it is a draft edit.
+  for (const [el, key] of FIELDS) {
+    el.addEventListener('change', () => {
+      const v = readDims()[key];
+      if (!(v > 0)) { fillDims(); return; }
+      dispatch?.({ type: 'edit', patch: { dims: { [key]: v } } });
+      render();
+    });
+  }
+  let defaultHeightRef = 'deck';
+  $('.cal-href').addEventListener('change', (e) => {
+    defaultHeightRef = e.target.value;
+    dispatch?.({ type: 'edit', patch: { dims: {} } });   // no-op edit: marks the draft dirty; the value rides along on Apply
+    render();
+  });
+
+  // ── messages ──
+  function showWarnings(list) {
+    warnEl.hidden = list.length === 0;
+    warnEl.innerHTML = list.map((m) => `<div>${escapeHtml(m)}</div>`).join('');
+  }
+  let checkSeq = 0;
+  function crossCheck(rec) {
+    if (typeof onCrossCheck !== 'function') return;
+    const seq = ++checkSeq;
+    let p;
+    try { p = Promise.resolve(onCrossCheck(rec)); } catch { return; }
+    p.then((res) => {
+      if (seq !== checkSeq) return;
+      if (!res || !res.available || !(res.median_error_pct > CROSS_CHECK_WARN_PCT)) return;
+      persistedWarning = crossCheckMessage(res.median_error_pct);
+      render();
+    }).catch(() => {});
+  }
+
+  /** The record Apply would commit: the draft's marks and dims, depth fit from the real sampler. */
+  function recordFromDraft(d) {
     const rec = {
-      version: 1, units, ...dims,
-      marks: JSON.parse(JSON.stringify(marking.marks)),
+      version: 1, units, width_ft: d.dims.width_ft, height_ft: d.dims.height_ft, depth_ft: d.dims.depth_ft,
+      marks: JSON.parse(JSON.stringify(d.marks)),
       depth_fit: null, depth_check: null,
     };
-    const v = validateMarks(rec);
-    if (!v.ok) { showErrors(v.errors); showWarnings([]); return; }
-    showErrors([]);
-    const { width, height } = getState();
-    const cam = solveCamera(rec, height / width);
-    rec.depth_fit = fitDepth(rec, cam, sampleDepth);
-    const warns = [];
-    if (cam.height_check_pct > 10) {
-      warns.push(`Photo implies an opening height ${cam.height_check_pct.toFixed(0)}% different from what you entered; check the top mark.`);
-    }
-    if (cam.perspective_ratio > 0.9) {
-      warns.push('Stage depth is small relative to the camera distance, so upstage distances are sensitive to the back-line marks. Place them carefully.');
-    }
-    if (!rec.depth_fit) {
-      warns.push('Depth map has no usable relief between lip and back line; upstage distances fall back to a linear estimate.');
+    return rec;
+  }
+
+  // ── render: numbers, warnings, button states ──
+  function render() {
+    const S = getDraftState?.() || null;
+    const d = S?.draft || null;
+    const st = getState();
+    fillDims();
+    const venue = typeof getVenue === 'function' ? getVenue() : null;
+    const noteEl = $('.cal-note');
+    noteEl.hidden = !venue;
+    noteEl.textContent = venue ? `Dimensions belong to venue ${venue.name} (shared by its scenes)` : '';
+    if (venue?.default_height_ref && !S?.dirty) defaultHeightRef = venue.default_height_ref;
+    $('.cal-href').value = defaultHeightRef;
+
+    const cam = d?.marks ? getPreviewCamera?.() : null;
+    let fit;
+    if (cam && d && typeof sampleDepth === 'function') fit = fitDepth(recordFromDraft(d), cam, sampleDepth);
+    const warns = draftWarnings(cam, fit === undefined ? undefined : fit);
+    if (!S?.dirty && persistedWarning) warns.push(persistedWarning);
+    else if (!S?.dirty && st.calibration?.depth_check?.warned && st.calibration.depth_check.median_error_pct > CROSS_CHECK_WARN_PCT) {
+      warns.push(crossCheckMessage(st.calibration.depth_check.median_error_pct));
     }
     showWarnings(warns);
-    exitMarking();
-    onApply(rec);
-    crossCheck(rec);
+
+    const dirty = !!S?.dirty;
+    $('.cal-dirty').hidden = !dirty;
+    const apply = $('.cal-apply');
+    apply.classList.toggle('is-dirty', dirty);
+    apply.disabled = !(d?.marks && cam);
+    $('.cal-revert').disabled = !dirty;
+    $('.cal-undo').disabled = !(S?.history?.length);
+    $('.cal-redo').disabled = !S?.redo;
+    $('.cal-clear').disabled = !st.calibration;
   }
-  function clear() {
-    checkSeq++;                      // drop any in-flight cross-check result
-    marking = createMarking({});
-    renderMarkers();
-    showErrors([]); showWarnings([]);
-    close();
-    onClear();
+
+  // ── actions ──
+  async function apply() {
+    const d = draft();
+    if (!d?.marks) return;
+    const rec = recordFromDraft(d);
+    const v = validateMarks(rec);
+    if (!v.ok) { showWarnings(v.errors); return; }
+    const cam = getPreviewCamera?.();
+    if (!cam) return;
+    if (typeof sampleDepth === 'function') rec.depth_fit = fitDepth(rec, cam, sampleDepth);
+    persistedWarning = null;
+    checkSeq++;
+    const venuePatch = { dims: { ...d.dims }, house: d.house ? { ...d.house } : null, default_height_ref: defaultHeightRef };
+    await onApplyCommit?.(rec, venuePatch);
+    crossCheck(rec);
+    render();
+  }
+  function revert() { dispatch?.({ type: 'revert' }); render(); }
+  async function undo() {
+    const S = getDraftState?.();
+    if (!S?.history?.length) return;
+    await onUndoRestore?.(S.history[S.history.length - 1]);
+    render();
+  }
+  async function redo() {
+    const S = getDraftState?.();
+    if (!S?.redo) return;
+    await onRedoRestore?.(S.redo);
+    render();
+  }
+  async function clear() {
+    checkSeq++; persistedWarning = null;
+    await onClearCommit?.();
+    render();
+  }
+  function open() {
+    const st = getState();
+    setUnits(st.calibration?.units || getUnits?.() || st.units || 'ft', false);
+    render();
+    panelEl.hidden = false;
+    onToggle?.(true);
+  }
+  function close() {
+    panelEl.hidden = true;
+    onToggle?.(false);
   }
   $('.cal-apply').addEventListener('click', apply);
+  $('.cal-revert').addEventListener('click', revert);
+  $('.cal-undo').addEventListener('click', undo);
+  $('.cal-redo').addEventListener('click', redo);
   $('.cal-clear').addEventListener('click', clear);
   $('.cal-close').addEventListener('click', close);
 
-  return { open, close, isMarking: () => markingActive, get marking() { return marking; } };
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return { open, close, render, isOpen: () => !panelEl.hidden, apply, undo, redo, revert, clear };
 }

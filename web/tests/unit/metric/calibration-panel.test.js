@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { panelDims, readDim } from '../../../src/metric/calibration-panel.js';
+import * as panelMod from '../../../src/metric/calibration-panel.js';
+const { panelDims, readDim } = panelMod;
 import { SYNTHETIC_VENUE } from '../../../src/rig/geometry.js';
 
 const V = SYNTHETIC_VENUE;   // 40 × 20 × 30
@@ -21,4 +22,18 @@ test('readDim keeps the exact prefilled value while the field is untouched, pars
   near(readDim('12', '12.3', 40.25, 'm'), 12 / 0.3048);      // edited in meters → feet
   assert.ok(Number.isNaN(readDim('abc', '40.3', 40.25, 'ft')));
   assert.ok(Number.isNaN(readDim('', '', null, 'ft')), 'no prefill and nothing typed');
+});
+
+test('draftWarnings: opening-height mismatch > 10%, perspective ratio > 0.9, and a null depth fit each warn; a good camera is silent', () => {
+  const { draftWarnings } = panelMod;
+  const good = { height_check_pct: 4, perspective_ratio: 0.5 };
+  assert.deepEqual(draftWarnings(good, undefined), []);
+  assert.deepEqual(draftWarnings(null, null), [], 'no camera: nothing to warn about');
+  const w1 = draftWarnings({ height_check_pct: 23.4, perspective_ratio: 0.5 }, undefined);
+  assert.equal(w1.length, 1); assert.match(w1[0], /23%/); assert.match(w1[0], /top handle/);
+  const w2 = draftWarnings({ height_check_pct: 0, perspective_ratio: 0.95 }, undefined);
+  assert.equal(w2.length, 1); assert.match(w2[0], /back-line handles/);
+  const w3 = draftWarnings(good, null);
+  assert.equal(w3.length, 1); assert.match(w3[0], /no usable relief/);
+  assert.equal(draftWarnings({ height_check_pct: 30, perspective_ratio: 0.99 }, null).length, 3);
 });
