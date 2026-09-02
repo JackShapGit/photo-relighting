@@ -76,4 +76,14 @@ def configs() -> list[tuple[str, list[Light], float, dict | None]]:
                   # luma at ~0.10 with < 3 % clipped pixels.
                   intensity=6.0, cone_angle=0.6, softness=0.1),
         ], 0.1, CALIBRATION),
+        ("linear_cyc", [
+            # 30 ft strip at 20 ft trim on the back line (Z = 26 of a 30 ft
+            # stage), lit from the closest point on the bar with a wrapped
+            # diffuse term (softness 0.6); no cone, no gobo. Intensity 7.0 puts
+            # the golden's mean luma at 0.084 (4.0 gave 0.063; the strip only
+            # reaches the far pixels, so the mean saturates while clipping
+            # grows: 4.7 % of pixels > 0.95 at 7.0).
+            Light(type="linear", endpoint_a_ft=(-15.0, 20.0, 26.0), endpoint_b_ft=(15.0, 20.0, 26.0),
+                  intensity=7.0, softness=0.6),
+        ], 0.1, CALIBRATION),
     ]

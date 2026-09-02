@@ -146,3 +146,32 @@ test('clampEnginePosition brings an off-frame engine position back into reach', 
 });
 
 const vclose = (a, b, eps = 1e-9) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= eps);
+
+// ── Linear lights (Spec 2): endpoints in feet, engine proxies per endpoint ──
+
+test('syncLightFromFeet on a linear light: endpoint proxies, midpoint position_ft, placeholder direction', () => {
+  const L = { type: 'linear', position: [0.5, 0.5, 0.5], direction: [0, 0, 1], target: null, falloff: 1,
+    endpoint_a_ft: [-15, 20, 26], endpoint_b_ft: [15, 20, 26] };
+  syncLightFromFeet(L, record);
+  assert.deepEqual(L.position_ft, [0, 20, 26]);
+  assert.ok(Array.isArray(L.endpoint_a) && Array.isArray(L.endpoint_b), 'engine proxies per endpoint');
+  assert.ok(L.endpoint_a[0] < 0.5 && L.endpoint_b[0] > 0.5, 'A left of B in engine u');
+  assert.ok(Math.abs(L.endpoint_a[0] + L.endpoint_b[0] - 1) < 1e-9, 'symmetric about u = 0.5');
+  assert.deepEqual(L.direction_ft, [0, -1, 0]);
+  assert.deepEqual(L.direction, L.direction_eng);
+  assert.ok(Array.isArray(L.position_eng) && vclose(L.position, L.position_eng));
+});
+
+test('migrating an uncalibrated linear light derives feet endpoints; a 2D drag shifts both endpoints', () => {
+  const L = { type: 'linear', position: [0.5, 0.5, 0.5], direction: [0, 0, 1], target: null, falloff: 1,
+    endpoint_a: [0.3, 0.4, 0.5], endpoint_b: [0.7, 0.4, 0.5] };
+  migrateLightsToFeet([L], record);
+  assert.ok(Array.isArray(L.endpoint_a_ft) && Array.isArray(L.endpoint_b_ft));
+  assert.ok(vclose(L.position_ft, [0, 1, 2].map((i) => (L.endpoint_a_ft[i] + L.endpoint_b_ft[i]) / 2), 1e-9));
+  const a0 = L.endpoint_a_ft.slice(), b0 = L.endpoint_b_ft.slice();
+  L.position = [L.position[0] + 0.1, L.position[1], L.position[2]];   // 2D handle drag of the midpoint
+  syncLightsFromEngineEdits([L], record);
+  const dA = [0, 1, 2].map((i) => L.endpoint_a_ft[i] - a0[i]);
+  const dB = [0, 1, 2].map((i) => L.endpoint_b_ft[i] - b0[i]);
+  assert.ok(vclose(dA, dB, 1e-9) && dA[0] > 0, 'both endpoints translated by the same delta');
+});

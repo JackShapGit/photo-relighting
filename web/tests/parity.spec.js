@@ -6,6 +6,7 @@ import { createSceneFromFixture } from './helpers.js';
 const FIXTURE = path.resolve('packages/relighting_engine/tests/fixtures/images/portrait_a.jpg');
 const GOLDEN = path.resolve('packages/relighting_engine/tests/fixtures/expected/portrait_a__single_directional.png');
 const GOLDEN_CAL = path.resolve('packages/relighting_engine/tests/fixtures/expected/portrait_a__calibrated_foh_spot.png');
+const GOLDEN_LIN = path.resolve('packages/relighting_engine/tests/fixtures/expected/portrait_a__linear_cyc.png');
 
 // Tolerance for WebGL vs Python: per-pixel YIQ threshold 0.1, at most 2 % of
 // pixels may differ. The goldens under fixtures/expected are the snapshots
@@ -131,4 +132,32 @@ test('WebGL calibrated render matches Python golden within tolerance', async ({ 
 
   const webglPng = await captureCanvas(page, 'webgl_calibrated.png');
   expect(webglPng).toMatchSnapshot(['portrait_a__calibrated_foh_spot.png'], PARITY);
+});
+
+test('WebGL linear (cyc) render matches Python golden within tolerance', async ({ page }) => {
+  test.skip(!fs.existsSync(FIXTURE) || !fs.existsSync(GOLDEN_LIN), 'fixtures missing');
+
+  await uploadFixture(page);
+
+  // Matches the "linear_cyc" golden config in configs.py: a 30 ft strip at
+  // 20 ft trim on the back line, endpoints in feet, no cone, no gobo.
+  await page.evaluate(() => {
+    const s = window.__state;
+    s.calibration = { version: 1, units: 'ft', width_ft: 40, height_ft: 20, depth_ft: 30,
+      marks: { lipL: [0.1, 0.61333], lipR: [0.9, 0.61333], top: [0.5, 0.08], backL: [0.23333, 0.54222], backR: [0.76667, 0.54222] },
+      depth_fit: { a: -0.027778, b: 0.030556 }, depth_check: null };
+    window.__applyCalibration();
+    s.lights = [{ type: 'linear', position: [0.5, 0.5, 0.5], direction: [0, 0, 1], target: null,
+      endpoint_a_ft: [-15, 20, 26], endpoint_b_ft: [15, 20, 26],
+      intensity: 7.0, falloff: 1.0, cone_angle: 0.5, softness: 0.6, color: [1,1,1], color_temperature: null,
+      gel_preset: null, gobo: null, affects: 'all', enabled: true }];
+    window.__syncMetricLights();
+    s.ambient = 0.1;
+    window.__redraw();
+  });
+  mark('linear light applied + redraw');
+  await page.waitForTimeout(300);
+
+  const webglPng = await captureCanvas(page, 'webgl_linear.png');
+  expect(webglPng).toMatchSnapshot(['portrait_a__linear_cyc.png'], PARITY);
 });

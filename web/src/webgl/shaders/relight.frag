@@ -38,6 +38,9 @@ uniform vec3  u_fit;                    // a, b, hasFit(0/1)
 uniform vec3  u_l_position_eng[MAX_LIGHTS];   // engine-space proxy for shadow marching
 uniform vec3  u_l_direction_eng[MAX_LIGHTS];
 uniform int   u_l_shadowDir[MAX_LIGHTS];      // 1 = march along direction (light has no projection)
+// Linear (cyc/strip) lights, type 3: u_l_position is endpoint A, these are B.
+uniform vec3  u_l_endpoint_b[MAX_LIGHTS];      // lighting space (feet when metric)
+uniform vec3  u_l_endpoint_b_eng[MAX_LIGHTS];  // engine-space proxy of B
 
 float metric_zcam(float d) {
   if (u_fit.z < 0.5) return u_cam.y + d * u_cam2.w;     // no depth fit: linear over stage depth
@@ -209,7 +212,21 @@ void main() {
 
     vec3 Lvec; float atten;
     vec3 Lvec_eng;                                   // engine-space vector for shadow marching
-    if (u_l_type[i] == 0) {  // directional
+    float wrapDiff = -1.0;                           // <0 = not a linear light
+    if (u_l_type[i] == 3) {  // linear (cyc/strip): lit from the closest point on the bar
+      vec3 A = u_l_position[i], B = u_l_endpoint_b[i];
+      vec3 AB = B - A;
+      float t = clamp(dot(Pw - A, AB) / max(dot(AB, AB), 1e-9), 0.0, 1.0);
+      vec3 Q = A + t * AB;
+      vec3 d = Q - Pw; float dist = length(d) + 1e-6;
+      Lvec = d / dist;
+      atten = 1.0 / (1.0 + u_l_falloff[i] * dist * dist);
+      float s = u_l_softness[i];
+      wrapDiff = max(dot(Nw, Lvec) + s, 0.0) / (1.0 + s);
+      vec3 Ae = u_l_position_eng[i], Be = u_l_endpoint_b_eng[i]; vec3 ABe = Be - Ae;
+      float te = clamp(dot(P - Ae, ABe) / max(dot(ABe, ABe), 1e-9), 0.0, 1.0);
+      Lvec_eng = (u_metric == 1 && u_l_shadowDir[i] == 0) ? normalize(Ae + te * ABe - P) : Lvec;
+    } else if (u_l_type[i] == 0) {  // directional
       Lvec = normalize(-u_l_direction[i]);
       atten = 1.0;
       Lvec_eng = (u_metric == 1) ? normalize(-u_l_direction_eng[i]) : Lvec;
@@ -252,7 +269,7 @@ void main() {
       if (u_l_goboInvert[i] == 1) gobo = 1.0 - gobo;
     }
 
-    float diff = max(dot(Nw, Lvec), 0.0);
+    float diff = wrapDiff >= 0.0 ? wrapDiff : max(dot(Nw, Lvec), 0.0);
     float maskW = u_l_affects[i] == 0 ? 1.0
                 : u_l_affects[i] == 1 ? maskV
                 : (1.0 - maskV);

@@ -88,7 +88,7 @@ class GoboModel(BaseModel):
 
 
 class LightModel(BaseModel):
-    type: Literal["directional", "point", "spotlight", "reflector"]
+    type: Literal["directional", "point", "spotlight", "reflector", "linear"]
     position: list[float] = Field(default_factory=lambda: [0.0, 0.0, -1.0])
     direction: list[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0])
     target: list[float] | None = None
@@ -106,6 +106,11 @@ class LightModel(BaseModel):
     position_ft: list[float] | None = None
     target_ft: list[float] | None = None
     direction_ft: list[float] | None = None
+    # Linear (cyc/strip) lights: bar endpoints, feet and engine.
+    endpoint_a_ft: list[float] | None = None
+    endpoint_b_ft: list[float] | None = None
+    endpoint_a: list[float] | None = None
+    endpoint_b: list[float] | None = None
     normal: list[float] = Field(default_factory=lambda: [0.0, 0.0, -1.0])
     size: list[float] = Field(default_factory=lambda: [0.6, 0.4])
     reflectance: Annotated[float, Field(ge=0.0, le=1.0)] = 0.7
@@ -113,7 +118,8 @@ class LightModel(BaseModel):
 
     @model_validator(mode="after")
     def _validate_ft(self) -> "LightModel":
-        for k in ("position_ft", "target_ft", "direction_ft"):
+        for k in ("position_ft", "target_ft", "direction_ft",
+                  "endpoint_a_ft", "endpoint_b_ft", "endpoint_a", "endpoint_b"):
             v = getattr(self, k)
             if v is not None and len(v) != 3:
                 raise ValueError(f"{k} must have 3 components")
@@ -139,6 +145,10 @@ class LightModel(BaseModel):
             position_ft=tuple(self.position_ft) if self.position_ft else None,
             target_ft=tuple(self.target_ft) if self.target_ft else None,
             direction_ft=tuple(self.direction_ft) if self.direction_ft else None,
+            endpoint_a_ft=tuple(self.endpoint_a_ft) if self.endpoint_a_ft else None,
+            endpoint_b_ft=tuple(self.endpoint_b_ft) if self.endpoint_b_ft else None,
+            endpoint_a=tuple(self.endpoint_a) if self.endpoint_a else None,
+            endpoint_b=tuple(self.endpoint_b) if self.endpoint_b else None,
             normal=(self.normal[0], self.normal[1], self.normal[2]),
             size=(self.size[0], self.size[1]),
             reflectance=self.reflectance,

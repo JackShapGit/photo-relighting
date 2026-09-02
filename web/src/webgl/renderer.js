@@ -103,7 +103,9 @@ function buildLightUniformLocs() {
                   'falloff', 'cone_angle', 'softness', 'affects', 'enabled', 'hasGobo',
                   'goboScale', 'goboRotation', 'goboOffset', 'goboInvert',
                   // metric mode: engine-space proxies for shadow marching
-                  'position_eng', 'direction_eng', 'shadowDir'];
+                  'position_eng', 'direction_eng', 'shadowDir',
+                  // linear lights: endpoint B (u_l_position carries A)
+                  'endpoint_b', 'endpoint_b_eng'];
   const out = {};
   for (const f of fields) out[f] = gl.getUniformLocation(program, `u_l_${f}`);
   return out;
@@ -253,23 +255,41 @@ function uploadLights(lights, lightsResolved, cal = null) {
   // very field the server receives, so both march along one vector.
   const posEng = new Float32Array(8 * 3), dirEng = new Float32Array(8 * 3);
   const shadowDir = new Int32Array(8);
+  // Linear lights: u_l_position carries endpoint A, these carry endpoint B.
+  const endB = new Float32Array(8 * 3), endBEng = new Float32Array(8 * 3);
   const metric = !!cal;
   const fit = metric ? effectiveFit(cal) : null;
   for (let i = 0; i < N; i++) {
     const L = lights[i], R = lightsResolved[i] ?? L;
-    types[i] = { directional: 0, point: 1, spotlight: 2 }[L.type];
-    const posSrc = metric ? (L.position_ft || engineToWorld(L.position, cal.camera, fit)) : L.position;
+    types[i] = { directional: 0, point: 1, spotlight: 2, linear: 3 }[L.type];
+    const linear = L.type === 'linear';
+    let posSrc, posEngSrc, endBSrc, endBEngSrc;
+    if (linear) {
+      // Endpoints: feet when calibrated (engine proxies derived by the sync
+      // helper, null when behind the camera), the engine pair otherwise.
+      posSrc    = metric ? (L.endpoint_a_ft || L.position_ft || L.position) : (L.endpoint_a || L.position);
+      endBSrc   = metric ? (L.endpoint_b_ft || L.position_ft || L.position) : (L.endpoint_b || L.position);
+      posEngSrc = L.endpoint_a || L.position_eng || L.position;
+      endBEngSrc = L.endpoint_b || L.position_eng || L.position;
+      shadowDir[i] = metric && (!L.endpoint_a || !L.endpoint_b) ? 1 : 0;
+    } else {
+      posSrc = metric ? (L.position_ft || engineToWorld(L.position, cal.camera, fit)) : L.position;
+      endBSrc = posSrc;
+      posEngSrc = L.position_eng || L.position;
+      endBEngSrc = posEngSrc;
+      shadowDir[i] = metric && !L.position_eng ? 1 : 0;
+    }
     const dirSrc = metric ? (L.direction_ft || engineDirToWorld(L.direction)) : L.direction;
     pos.set(posSrc, i * 3); dir.set(dirSrc, i * 3); col.set(R.color, i * 3);
-    posEng.set(L.position_eng || L.position, i * 3);
+    posEng.set(posEngSrc, i * 3);
     dirEng.set(L.direction, i * 3);
-    shadowDir[i] = metric && !L.position_eng ? 1 : 0;
+    endB.set(endBSrc, i * 3); endBEng.set(endBEngSrc, i * 3);
     intensity[i] = L.intensity;
     falloff[i] = metric && L.falloff_ft != null ? L.falloff_ft : L.falloff;
     cone[i] = L.cone_angle; soft[i] = L.softness;
     affects[i] = { all: 0, subject: 1, background: 2 }[L.affects];
     enabled[i] = L.enabled ? 1 : 0;
-    hasGobo[i] = L.gobo ? 1 : 0;
+    hasGobo[i] = L.gobo && !linear ? 1 : 0;        // linear lights carry no gobo
   }
   gl.uniform1iv(locs.type, types);
   gl.uniform3fv(locs.position, pos);
@@ -285,6 +305,8 @@ function uploadLights(lights, lightsResolved, cal = null) {
   gl.uniform3fv(locs.position_eng, posEng);
   gl.uniform3fv(locs.direction_eng, dirEng);
   gl.uniform1iv(locs.shadowDir, shadowDir);
+  gl.uniform3fv(locs.endpoint_b, endB);
+  gl.uniform3fv(locs.endpoint_b_eng, endBEng);
 
   // Gobo transform arrays
   const goboScale = new Float32Array(8);

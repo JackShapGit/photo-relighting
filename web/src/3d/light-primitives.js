@@ -64,11 +64,75 @@ function coneGeometry(coneAngle, S) {
   return g;
 }
 
+/** Three-frame endpoints of a linear light: feet when calibrated and the bar
+ * has feet endpoints, else the engine → world mapping of the engine pair. */
+export function linearEndpointsThree(light) {
+  if (metricCal && Array.isArray(light.endpoint_a_ft) && Array.isArray(light.endpoint_b_ft)) {
+    return [worldFtToThree(light.endpoint_a_ft), worldFtToThree(light.endpoint_b_ft)];
+  }
+  const a = light.endpoint_a || light.position, b = light.endpoint_b || light.position;
+  return [lightToWorld(a), lightToWorld(b)];
+}
+
+function barGeometry(light, S) {
+  const [a, b] = linearEndpointsThree(light);
+  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+  const len = Math.max(A.distanceTo(B), 1e-3);
+  const radius = Math.max(0.02, 0.15 * S / 20);     // 0.15 ft in feet scenes, thin in engine space
+  const g = new THREE.CylinderGeometry(radius, radius, len, 12, 1);
+  // Cylinder axis is +Y; rotate it onto A→B and centre it on the midpoint,
+  // expressed relative to the group (which sits at the light's position).
+  const dir = B.clone().sub(A).normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  g.applyQuaternion(q);
+  const mid = A.clone().add(B).multiplyScalar(0.5);
+  const origin = new THREE.Vector3(...lightPos(light));
+  g.translate(mid.x - origin.x, mid.y - origin.y, mid.z - origin.z);
+  return g;
+}
+
 export function buildLightPrimitive(light) {
   if (light.type === 'reflector') {
     return buildReflectorPrimitive(light);
   }
   const S = metricS();
+
+  if (light.type === 'linear') {
+    // Linear (cyc/strip) light: a thin bar between the endpoints; same
+    // group / hit target / outline / marker pattern as the other primitives.
+    const group = new THREE.Group();
+    group.userData.lightId = light.id;
+    group.position.set(...lightPos(light));
+
+    const barMat = new THREE.MeshBasicMaterial({ color: rgbToHex(light.color) });
+    const bar = new THREE.Mesh(barGeometry(light, S), barMat);
+    bar.userData.lightId = light.id;
+    group.add(bar);
+
+    const hitGeo = new THREE.SphereGeometry(HIT_RADIUS * S, 8, 6);
+    const hit = new THREE.Mesh(hitGeo, new THREE.MeshBasicMaterial({ visible: false }));
+    hit.userData.lightId = light.id;
+    hit.userData.isHitTarget = true;
+    group.add(hit);
+
+    const ringGeo = new THREE.TorusGeometry(SPHERE_RADIUS * 1.6 * S, 0.006 * S, 8, 32);
+    const outline = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+    outline.visible = false;
+    group.add(outline);
+
+    let marker = null;
+    if (metricCal) {
+      marker = buildFixtureMarker(Math.max(1, S / 20));
+      marker.userData.lightId = light.id;
+      group.add(marker);
+    }
+
+    // `sphere` is what the rest of the viewport treats as the visible body.
+    const prim = { group, sphere: bar, bar, hit, arrow: null, cone: null, outline, marker, _S: S };
+    prim.update = (next) => update(prim, next);
+    applyMarkerMode(prim, light);
+    return prim;
+  }
 
   const group = new THREE.Group();
   group.userData.lightId = light.id;
@@ -149,6 +213,11 @@ function applyMarkerMode(prim, light) {
 function update(prim, light) {
   prim.group.position.set(...lightPos(light));
   prim.sphere.material.color.set(rgbToHex(light.color));
+  if (prim.bar) {
+    // Endpoints may have moved: rebuild the bar relative to the new origin.
+    prim.bar.geometry.dispose();
+    prim.bar.geometry = barGeometry(light, prim._S);
+  }
   if (prim.arrow) {
     prim.arrow.setDirection(new THREE.Vector3(...lightDir(light)));
     prim.arrow.setColor(new THREE.Color(rgbToHex(light.color)));

@@ -66,5 +66,16 @@ def test_calibration_model_rejects_non_finite_depth_fit_and_dims():
         CalibrationModel(width_ft=float("inf"), height_ft=20, depth_ft=30, marks=MARKS)
 
 
+def test_light_model_carries_linear_endpoints():
+    m = LightModel(type="linear", endpoint_a_ft=[-15, 20, 26], endpoint_b_ft=[15, 20, 26],
+                   endpoint_a=[0.2, 0.4, 0.6], endpoint_b=[0.8, 0.4, 0.6])
+    L = m.to_engine()
+    assert L.type == "linear" and L.endpoint_a_ft == (-15, 20, 26) and L.endpoint_b == (0.8, 0.4, 0.6)
+    with pytest.raises(ValidationError):
+        LightModel(type="linear", endpoint_a_ft=[-15, 20], endpoint_b_ft=[15, 20, 26])
+    with pytest.raises(ValueError):                    # engine validate: no endpoints at all
+        LightModel(type="linear").to_engine()
+
+
 def test_calibration_model_accepts_marks_slightly_outside_the_photo():
     assert _cal({**MARKS, "lipL": [-0.2, 0.61]}).to_engine(0.75).camera.dist_ft > 0

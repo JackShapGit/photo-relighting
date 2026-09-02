@@ -24,7 +24,19 @@ export function solveRecord(record, aspect) {
 // handling), so every light gets feet fields and an engine proxy.
 export function syncLightFromFeet(L, record) {
   const cam = record.camera, fit = effectiveFit(record);
-  if (L.target_ft) {
+  if (L.type === 'linear') {
+    // Linear (cyc/strip) light: the bar's endpoints are the source of truth.
+    // position_ft is the midpoint so Spec 1 code that reads it keeps working;
+    // each endpoint gets its own engine proxy (null behind the camera); the
+    // direction is a placeholder (the shader ignores it for type 3).
+    if (L.endpoint_a_ft && L.endpoint_b_ft) {
+      L.position_ft = [0, 1, 2].map((i) => (L.endpoint_a_ft[i] + L.endpoint_b_ft[i]) / 2);
+      L.endpoint_a = worldToEngine(L.endpoint_a_ft, cam, fit);
+      L.endpoint_b = worldToEngine(L.endpoint_b_ft, cam, fit);
+    }
+    L.direction_ft = [0, -1, 0];
+    delete L.target_ft;
+  } else if (L.target_ft) {
     const d = [0, 1, 2].map((i) => L.target_ft[i] - L.position_ft[i]);
     L.direction_ft = Math.hypot(...d) > EPS ? norm(d) : engineDirToWorld(L.direction);
   } else if (!L.direction_ft) {
@@ -46,6 +58,24 @@ export function syncLightFromFeet(L, record) {
 
 export function syncLightFromEngine(L, record) {
   const cam = record.camera, fit = effectiveFit(record);
+  if (L.type === 'linear') {
+    if (!L.endpoint_a_ft || !L.endpoint_b_ft) {
+      // First migration of an uncalibrated bar: its engine endpoints become feet.
+      if (L.endpoint_a && L.endpoint_b) {
+        L.endpoint_a_ft = engineToWorld(L.endpoint_a, cam, fit);
+        L.endpoint_b_ft = engineToWorld(L.endpoint_b, cam, fit);
+      }
+    } else if (L.position_ft) {
+      // The 2D handle drags the midpoint: translate both endpoints with it.
+      const mid = engineToWorld(L.position, cam, fit);
+      const d = [0, 1, 2].map((i) => mid[i] - L.position_ft[i]);
+      if (d.some((v) => Math.abs(v) > EPS)) {
+        L.endpoint_a_ft = L.endpoint_a_ft.map((v, i) => v + d[i]);
+        L.endpoint_b_ft = L.endpoint_b_ft.map((v, i) => v + d[i]);
+      }
+    }
+    return syncLightFromFeet(L, record);
+  }
   L.position_ft = engineToWorld(L.position, cam, fit);
   if (Array.isArray(L.target)) L.target_ft = engineToWorld(L.target, cam, fit);
   else delete L.target_ft;
@@ -96,6 +126,14 @@ export function syncLightsFromEngineEdits(lights, record) {
 
 export function clearMetric(L) {
   for (const k of ['position_ft', 'target_ft', 'direction_ft', 'position_eng', 'direction_eng', 'falloff_ft']) delete L[k];
+  if (L.type === 'linear') {
+    // Keep the bar usable uncalibrated: its engine proxies become the endpoints.
+    for (const k of ['endpoint_a_ft', 'endpoint_b_ft']) delete L[k];
+    if (!L.endpoint_a || !L.endpoint_b) {
+      L.endpoint_a = [L.position[0] - 0.2, L.position[1], L.position[2]];
+      L.endpoint_b = [L.position[0] + 0.2, L.position[1], L.position[2]];
+    }
+  }
 }
 
 /** After Clear calibration: keep the engine position where a 2D handle can reach it. */

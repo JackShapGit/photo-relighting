@@ -301,35 +301,79 @@ def render(
             continue
         L.validate()
         dir_vec = effective_direction(L)
+        wrap_diff = None            # set by the linear branch (wrap diffuse replaces max(N·L, 0))
 
-        # Lighting-space light (feet in metric mode, engine space otherwise)
-        # plus the engine-space shadow proxy. Same choices, same order, as the
-        # u_metric branch in relight.frag.
-        if metric:
-            pos_ft, dir_ft, proxy = _metric_light_vectors(L, calibration)
-            light_pos = torch.tensor(pos_ft, device=device, dtype=torch.float32)
-            light_dir = torch.tensor(dir_ft, device=device, dtype=torch.float32)
-            falloff = falloff_to_metric(L.falloff, calibration.width_ft)
-        else:
-            proxy = None
-            light_pos = torch.tensor(L.position, device=device, dtype=torch.float32)
-            light_dir = torch.tensor(dir_vec, device=device, dtype=torch.float32)
-            falloff = L.falloff
-
-        if L.type == "directional":
-            d = light_dir / (light_dir.norm() + 1e-8)
-            L_vec = -d.expand_as(Pw)
-            atten = torch.ones((h, w), device=device, dtype=torch.float32)
-        else:
-            diff_vec = light_pos - Pw
+        if L.type == "linear":
+            # Linear (cyc/strip) light: each pixel is lit from the closest
+            # point Q on the bar AB, with a wrapped diffuse term so the strip
+            # reads as a soft wash; no cone, no gobo. Mirrors the
+            # u_l_type == 3 branch of relight.frag, in the same order.
+            if metric:
+                A = torch.tensor(L.endpoint_a_ft, device=device, dtype=torch.float32)
+                B = torch.tensor(L.endpoint_b_ft, device=device, dtype=torch.float32)
+                falloff = falloff_to_metric(L.falloff, calibration.width_ft)
+                a_eng = world_to_engine(L.endpoint_a_ft, calibration.camera, effective_fit(calibration))
+                b_eng = world_to_engine(L.endpoint_b_ft, calibration.camera, effective_fit(calibration))
+            else:
+                A = torch.tensor(L.endpoint_a, device=device, dtype=torch.float32)
+                B = torch.tensor(L.endpoint_b, device=device, dtype=torch.float32)
+                falloff = L.falloff
+                a_eng, b_eng = L.endpoint_a, L.endpoint_b
+            AB = B - A
+            t = torch.clamp(((Pw - A) * AB).sum(-1, keepdim=True) / (AB * AB).sum().clamp_min(1e-9), 0.0, 1.0)
+            Q = A + t * AB
+            diff_vec = Q - Pw
             dist = diff_vec.norm(dim=-1, keepdim=True) + 1e-6
             L_vec = diff_vec / dist
             atten = 1.0 / (1.0 + falloff * (dist.squeeze(-1) ** 2))
+            s = L.softness
+            wrap_diff = torch.clamp((Nw * L_vec).sum(-1) + s, min=0.0) / (1.0 + s)
+            if a_eng is not None and b_eng is not None:
+                Ae = torch.tensor(a_eng, device=device, dtype=torch.float32)
+                Be = torch.tensor(b_eng, device=device, dtype=torch.float32)
+                ABe = Be - Ae
+                te = torch.clamp(((P - Ae) * ABe).sum(-1, keepdim=True) / (ABe * ABe).sum().clamp_min(1e-9), 0.0, 1.0)
+                L_vec_eng = torch.nn.functional.normalize(Ae + te * ABe - P, dim=-1)
+                mid_eng = tuple(((Ae + Be) * 0.5).tolist())
+                L_eng = dataclasses.replace(L, type="point", position=mid_eng, target=None)
+            else:
+                # An endpoint has no projection (behind the camera): march
+                # along the lighting-space vector, like other lights without a
+                # proxy (relight.frag: u_l_shadowDir == 1).
+                L_vec_eng = L_vec
+                L_eng = dataclasses.replace(L, type="directional", target=None)
+            light_dir = torch.tensor(dir_vec, device=device, dtype=torch.float32)
+        else:
+            # Lighting-space light (feet in metric mode, engine space otherwise)
+            # plus the engine-space shadow proxy. Same choices, same order, as the
+            # u_metric branch in relight.frag.
+            if metric:
+                pos_ft, dir_ft, proxy = _metric_light_vectors(L, calibration)
+                light_pos = torch.tensor(pos_ft, device=device, dtype=torch.float32)
+                light_dir = torch.tensor(dir_ft, device=device, dtype=torch.float32)
+                falloff = falloff_to_metric(L.falloff, calibration.width_ft)
+            else:
+                proxy = None
+                light_pos = torch.tensor(L.position, device=device, dtype=torch.float32)
+                light_dir = torch.tensor(dir_vec, device=device, dtype=torch.float32)
+                falloff = L.falloff
+
+            if L.type == "directional":
+                d = light_dir / (light_dir.norm() + 1e-8)
+                L_vec = -d.expand_as(Pw)
+                atten = torch.ones((h, w), device=device, dtype=torch.float32)
+            else:
+                diff_vec = light_pos - Pw
+                dist = diff_vec.norm(dim=-1, keepdim=True) + 1e-6
+                L_vec = diff_vec / dist
+                atten = 1.0 / (1.0 + falloff * (dist.squeeze(-1) ** 2))
 
         # Engine-space vector for shadow marching. Metric: directional lights and
         # lights without a projection (no depth fit) march along the negated
         # engine direction; otherwise toward the engine-space proxy position.
-        if metric:
+        if L.type == "linear":
+            pass                                   # L_vec_eng / L_eng set above
+        elif metric:
             if L.type == "directional" or proxy is None:
                 d_eng = torch.tensor(L.direction, device=device, dtype=torch.float32)
                 d_eng = d_eng / (d_eng.norm() + 1e-8)
@@ -353,7 +397,7 @@ def render(
         else:
             cone = torch.ones((h, w), device=device, dtype=torch.float32)
 
-        if L.gobo is not None and L.gobo.texture_id in gobo_textures:
+        if L.gobo is not None and L.type != "linear" and L.gobo.texture_id in gobo_textures:
             if metric:
                 if L.type == "directional":
                     # Ortho projection stays fully engine-space: engine P with the
@@ -382,7 +426,7 @@ def render(
         else:
             g = torch.ones((h, w), device=device, dtype=torch.float32)
 
-        diff = torch.clamp((Nw * L_vec).sum(dim=-1), min=0.0)
+        diff = wrap_diff if wrap_diff is not None else torch.clamp((Nw * L_vec).sum(dim=-1), min=0.0)
 
         if L.affects == "all":
             mask_w = torch.ones((h, w), device=device, dtype=torch.float32)
