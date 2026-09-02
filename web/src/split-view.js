@@ -82,6 +82,94 @@ export function computeSplitRatio({
 
 // ── DOM wiring ──────────────────────────────────────────────────────────
 
+/**
+ * Pointer-drag mechanics for a resize divider, shared by the stage split
+ * and the left-pane divider: pointer capture, one layout per animation
+ * frame while dragging (synchronous where rAF is unavailable), a body class
+ * for cursor/selection/pointer-events, and a double-click reset.
+ *
+ * @param {object}   opts
+ * @param {Element}  opts.dividerEl
+ * @param {Function} [opts.onDrag]     (clientX) => void — throttled while dragging; called once more with the release x
+ * @param {Function} [opts.onEnd]      () => void — after the final onDrag
+ * @param {Function} [opts.onDblClick] () => void
+ * @param {Function} [opts.canStart]   () => boolean — gates press and double click (default: always)
+ * @param {string}   [opts.bodyClass]  class on <body> while dragging
+ */
+export function createDragDivider({
+  dividerEl,
+  onDrag,
+  onEnd,
+  onDblClick,
+  canStart,
+  bodyClass = 'is-resizing-split',
+} = {}) {
+  const body = dividerEl.ownerDocument?.body;
+  const allowed = () => (typeof canStart === 'function' ? !!canStart() : true);
+  const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : null;
+  const cancelRaf = typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : () => {};
+
+  let dragging = false;
+  let pendingX = null;
+  let rafId = 0;
+
+  const flush = () => {
+    rafId = 0;
+    if (pendingX == null) return;
+    const x = pendingX;
+    pendingX = null;
+    if (typeof onDrag === 'function') onDrag(x);
+  };
+
+  const onPointerDown = (e) => {
+    if (!allowed() || e.button !== 0) return;
+    dragging = true;
+    dividerEl.setPointerCapture?.(e.pointerId);
+    dividerEl.classList.add('is-active');
+    if (bodyClass) body?.classList.add(bodyClass);
+    e.preventDefault();
+  };
+  const onPointerMove = (e) => {
+    if (!dragging) return;
+    pendingX = e.clientX;
+    if (raf) { if (!rafId) rafId = raf(flush); }
+    else flush();
+  };
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    if (rafId) { cancelRaf(rafId); rafId = 0; }
+    if (e && Number.isFinite(e.clientX)) pendingX = e.clientX;
+    flush();
+    if (typeof onEnd === 'function') onEnd();
+    dividerEl.classList.remove('is-active');
+    if (bodyClass) body?.classList.remove(bodyClass);
+    if (e && dividerEl.hasPointerCapture?.(e.pointerId)) dividerEl.releasePointerCapture(e.pointerId);
+  };
+  const onDbl = () => {
+    if (!allowed()) return;
+    if (typeof onDblClick === 'function') onDblClick();
+  };
+
+  dividerEl.addEventListener('pointerdown', onPointerDown);
+  dividerEl.addEventListener('pointermove', onPointerMove);
+  dividerEl.addEventListener('pointerup', endDrag);
+  dividerEl.addEventListener('pointercancel', endDrag);
+  dividerEl.addEventListener('dblclick', onDbl);
+
+  return {
+    isDragging: () => dragging,
+    destroy() {
+      dividerEl.removeEventListener('pointerdown', onPointerDown);
+      dividerEl.removeEventListener('pointermove', onPointerMove);
+      dividerEl.removeEventListener('pointerup', endDrag);
+      dividerEl.removeEventListener('pointercancel', endDrag);
+      dividerEl.removeEventListener('dblclick', onDbl);
+      if (rafId) cancelRaf(rafId);
+    },
+  };
+}
+
 function safeGet(storage, key) {
   try { return storage ? storage.getItem(key) : null; } catch { return null; }
 }
@@ -112,7 +200,6 @@ export function createSplitView({
   const store = storage !== undefined
     ? storage
     : (typeof localStorage !== 'undefined' ? localStorage : null);
-  const body = stageEl.ownerDocument?.body;
 
   let mode = migrateMode({
     stored: safeGet(store, VIEW_MODE_KEY),
@@ -167,59 +254,23 @@ export function createSplitView({
   };
   modeEl?.addEventListener('click', onModeClick);
 
-  // ── divider drag ──
-  let dragging = false;
-  let pendingX = null;
-  let rafId = 0;
-
-  const flushDrag = () => {
-    rafId = 0;
-    if (pendingX == null) return;
-    const rect = stageEl.getBoundingClientRect();
-    const next = computeSplitRatio({
-      clientX: pendingX,
-      stageLeft: rect.left,
-      stageWidth: rect.width,
-      dividerWidth: dividerEl.getBoundingClientRect().width || DIVIDER_PX,
-    });
-    pendingX = null;
-    if (next !== ratio) setRatio(next, { persist: false });
-  };
-
-  const onPointerDown = (e) => {
-    if (mode !== 'split' || e.button !== 0) return;
-    dragging = true;
-    dividerEl.setPointerCapture?.(e.pointerId);
-    dividerEl.classList.add('is-active');
-    body?.classList.add('is-resizing-split');
-    e.preventDefault();
-  };
-  const onPointerMove = (e) => {
-    if (!dragging) return;
-    pendingX = e.clientX;
-    if (!rafId) rafId = requestAnimationFrame(flushDrag);
-  };
-  const endDrag = (e) => {
-    if (!dragging) return;
-    dragging = false;
-    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-    if (e && Number.isFinite(e.clientX)) pendingX = e.clientX;
-    flushDrag();
-    safeSet(store, SPLIT_RATIO_KEY, String(ratio));
-    dividerEl.classList.remove('is-active');
-    body?.classList.remove('is-resizing-split');
-    if (e && dividerEl.hasPointerCapture?.(e.pointerId)) dividerEl.releasePointerCapture(e.pointerId);
-  };
-  const onDblClick = () => {
-    if (mode !== 'split') return;
-    setRatio(DEFAULT_RATIO);
-  };
-
-  dividerEl.addEventListener('pointerdown', onPointerDown);
-  dividerEl.addEventListener('pointermove', onPointerMove);
-  dividerEl.addEventListener('pointerup', endDrag);
-  dividerEl.addEventListener('pointercancel', endDrag);
-  dividerEl.addEventListener('dblclick', onDblClick);
+  // ── divider drag (shared mechanics; only the ratio math lives here) ──
+  const drag = createDragDivider({
+    dividerEl,
+    canStart: () => mode === 'split',
+    onDrag: (clientX) => {
+      const rect = stageEl.getBoundingClientRect();
+      const next = computeSplitRatio({
+        clientX,
+        stageLeft: rect.left,
+        stageWidth: rect.width,
+        dividerWidth: dividerEl.getBoundingClientRect().width || DIVIDER_PX,
+      });
+      if (next !== ratio) setRatio(next, { persist: false });
+    },
+    onEnd: () => safeSet(store, SPLIT_RATIO_KEY, String(ratio)),
+    onDblClick: () => setRatio(DEFAULT_RATIO),
+  });
 
   // Initial state: write the migrated mode so the legacy key stops mattering.
   safeSet(store, VIEW_MODE_KEY, mode);
@@ -235,12 +286,7 @@ export function createSplitView({
     resetRatio: () => setRatio(DEFAULT_RATIO),
     destroy() {
       modeEl?.removeEventListener('click', onModeClick);
-      dividerEl.removeEventListener('pointerdown', onPointerDown);
-      dividerEl.removeEventListener('pointermove', onPointerMove);
-      dividerEl.removeEventListener('pointerup', endDrag);
-      dividerEl.removeEventListener('pointercancel', endDrag);
-      dividerEl.removeEventListener('dblclick', onDblClick);
-      if (rafId) cancelAnimationFrame(rafId);
+      drag.destroy();
     },
   };
 }

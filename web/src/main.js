@@ -35,6 +35,7 @@ import { initTheme } from './theme.js';
 import { openNewScenePopup } from './new-scene-popup.js';
 import { openScenesListModal } from './scenes-list-modal.js';
 import { createSplitView } from './split-view.js';
+import { createPaneDivider, LEFT_TAB_KEY } from './pane-divider.js';
 import {
   solveRecord, syncLightFromFeet, syncLightFromEngine, migrateLightsToFeet, clearMetric,
   syncLightsFromEngineEdits, clampEnginePosition,
@@ -677,8 +678,58 @@ async function setupPolishUI() {
 // Every tree render first regenerates the rig groups when in rig mode, so
 // callers never have to know which mode the scene is in.
 const treeView = mountTree(state, onTreeSelect, onChange, onRequestAddLight);
-tree = { render() { rebuildRigTree(); treeView.render(); } };
+tree = { render() { rebuildRigTree(); treeView.render(); refreshLeftTabs(); } };
 refreshProps();
+
+// ─── Left pane: Lights | Rig tabs and the draggable divider (Spec 2) ─────
+// The Rig tab only makes sense in rig mode (calibrated scene with a venue);
+// it opens by itself when such a scene loads. The pane width is remembered
+// per tab so the Rig tables get room without widening the Lights tree.
+const LEFT_TABS = ['lights', 'rig'];
+const RIG_TAB_HINT = 'Calibrate the scene to build a rig';
+const leftTabButtons = Array.from(document.querySelectorAll('#tree-pane .pane-tabs button[data-tab]'));
+let leftTab = 'lights';
+const paneDivider = createPaneDivider({
+  paneEl: document.getElementById('tree-pane'),
+  dividerEl: document.getElementById('pane-divider'),
+  getTab: () => leftTab,
+  onLayout: () => window.dispatchEvent(new Event('resize')),   // fitCanvasWrap + 3D resize listen
+});
+
+function setLeftTab(next, { persist = true } = {}) {
+  const tab = LEFT_TABS.includes(next) && !(next === 'rig' && !rigMode(state)) ? next : 'lights';
+  leftTab = tab;
+  document.getElementById('tree-root').hidden = tab !== 'lights';
+  document.getElementById('rig-root').hidden = tab !== 'rig';
+  for (const b of leftTabButtons) b.setAttribute('aria-pressed', b.dataset.tab === tab ? 'true' : 'false');
+  paneDivider?.applyTab(tab);
+  if (persist) { try { localStorage.setItem(LEFT_TAB_KEY, tab); } catch {} }
+  refreshLeftTabs();
+}
+
+// Enable/disable the Rig tab from the scene's mode; runs with every tree render.
+function refreshLeftTabs() {
+  const rig = rigMode(state);
+  for (const b of leftTabButtons) {
+    if (b.dataset.tab !== 'rig') continue;
+    b.setAttribute('aria-disabled', rig ? 'false' : 'true');
+    b.title = rig ? 'Hang positions and fixtures' : RIG_TAB_HINT;
+  }
+  if (!rig && leftTab === 'rig') setLeftTab('lights');
+}
+
+for (const b of leftTabButtons) {
+  b.addEventListener('click', () => {
+    if (b.getAttribute('aria-disabled') === 'true') return;
+    setLeftTab(b.dataset.tab);
+  });
+}
+{
+  let storedTab = 'lights';
+  try { storedTab = localStorage.getItem(LEFT_TAB_KEY) || 'lights'; } catch {}
+  setLeftTab(storedTab, { persist: false });
+}
+window.__setLeftTab = setLeftTab;   // console / spec hook
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && placement?.isActive()) {
@@ -1081,6 +1132,7 @@ unitToggle?.addEventListener('click', (e) => {
 document.addEventListener('relight:calibration', async (e) => {
   updateBadge();
   refreshProps();
+  setLeftTab(rigMode(state) ? 'rig' : 'lights');   // Rig opens with a calibrated scene
   await setCalibration3D(e.detail, state.units);
   syncLightsToScene(state.lights, state.selectedId);
   frameStage3D();

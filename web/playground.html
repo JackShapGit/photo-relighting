@@ -62,14 +62,19 @@
   <main>
     <aside id="tree-pane">
       <div class="pane-header">
-        <h2>Lights</h2>
+        <div class="pane-tabs" role="tablist" aria-label="Left pane">
+          <button data-tab="lights" type="button" aria-pressed="true" title="Lights tree">Lights</button>
+          <button data-tab="rig" type="button" aria-pressed="false" aria-disabled="true" title="Calibrate the scene to build a rig">Rig</button>
+        </div>
         <div class="pane-actions">
           <button id="add-light-btn" type="button" title="Add light">+ Light</button>
           <button id="add-group-btn" type="button" title="Add group">+ Group</button>
         </div>
       </div>
       <ul id="tree-root"></ul>
+      <div id="rig-root" hidden></div>
     </aside>
+    <div id="pane-divider" class="pane-divider" title="Drag to resize; double-click to reset"></div>
 
     <section id="stage">
       <div id="stage2d-wrap">
