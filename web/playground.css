@@ -195,7 +195,7 @@ main {
 #rig-root[hidden], #tree-root[hidden] { display: none; }
 
 /* ─── Rig tab (Spec 2): positions and fixtures tables ─────────────── */
-#rig-root { padding: 6px 8px 12px; font-size: 12px; }
+#rig-root { padding: 6px 6px 12px; font-size: 12px; }
 .rig-status {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   padding: 4px 2px 8px; color: var(--text-muted); font-size: 12px;
@@ -226,7 +226,7 @@ main {
   color: var(--text-primary); font-size: 12px; padding: 1px 3px; margin: 0;
 }
 .rig-table input.rig-num { width: 56px; text-align: right; }
-.rig-table input.rig-text { width: 88px; }
+.rig-table input.rig-text { width: 72px; }
 .rig-table input[type="number"] { width: 52px; }
 .rig-table select { max-width: 110px; }
 .rig-table input:hover, .rig-table select:hover { border-color: var(--input-border, #444); }
@@ -242,6 +242,23 @@ main {
 .rig-btn:hover { color: var(--text-primary); border-color: var(--accent); }
 .rig-toolbar { display: flex; gap: 6px; padding: 4px 0 2px; }
 .rig-load { display: flex; gap: 6px; align-items: center; padding: 4px 0; color: var(--text-muted); }
+
+/* Venue editor modal (Spec 2). */
+.venue-editor { width: 720px; gap: 10px; }
+.venue-editor .modal-row > input[type="text"] { flex: 1; }
+.venue-dims { display: flex; gap: 12px; flex-wrap: wrap; }
+.venue-dims label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-muted); flex: 1; min-width: 120px; }
+.venue-dims input { width: 100%; box-sizing: border-box; }
+.venue-note { margin: 0; font-size: 12px; color: var(--text-muted); }
+.venue-editor .checkbox-row { font-size: 13px; }
+.venue-editor .rig-table-wrap { max-height: 40vh; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; }
+.venue-dup { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.venue-dup input { flex: 1; }
+.venue-editor .modal-actions .modal-spacer { flex: 1; }
+.venue-primary { background: var(--accent); color: var(--accent-text, #fff); border-color: var(--accent); }
+.venue-danger { color: var(--danger, #c66); }
+#calibrate-btn.is-venue-missing { color: var(--warn, #e0a030); }
+.cal-note { font-size: 11px; color: var(--text-muted); margin: 2px 0 6px; }
 
 /* Props pane: the compact Rig fieldset above the light controls. */
 .rig-props { border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px 6px; margin: 0 0 8px; }

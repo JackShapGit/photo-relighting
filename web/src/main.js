@@ -13,13 +13,14 @@ import {
   prepare, listGobos, render as serverRender, renderLayers,
   listScenes, getScene, createScene, updateScene, renameScene,
   refineMask, getCapabilities, currentWorkspace, checkCalibration,
-  listVenues, createVenue, getVenue, updateVenue,
+  listVenues, createVenue, getVenue, updateVenue, duplicateVenue, deleteVenue,
 } from './api.js';
 import { mergeVenueIntoCalibration } from './rig/geometry.js';
 import { rigMode, buildRigTree } from './rig/tree-mirror.js';
 import { syncRig, syncAllFixtures, detachFixture, detachAim } from './rig/fixture-sync.js';
 import { applyFixturePreset } from './rig/presets.js';
 import { mountRigTab, buildFixtureLight, nextOffset } from './rig/rig-tab.js';
+import { openVenueEditor, badgeText } from './rig/venue-editor.js';
 import {
   invalidatePolish,
   onPolishChange,
@@ -699,9 +700,79 @@ rigTab = mountRigTab({
   onVenueChange: applyVenueEdit,
   onLightsChange: structuralEdit,
   onSelect: onCanvasSelect,
-  openVenueEditor: () => calibPanel?.open(),   // Task 8 replaces this with the venue editor
+  openVenueEditor: () => openVenueEditorForScene(),
   listVenues,
 });
+
+// ─── Venue editor (Spec 2): the house behind the scene ───────────────────
+// Adopt a venue record as the scene's: live venue + snapshot, dimensions
+// mirrored into the calibration (re-solved against this image; marks are
+// unchanged), every light re-derived, tree/rig/props/3D refreshed, saved.
+function adoptVenue(v, { missing = false } = {}) {
+  state.venue = v;
+  state.venue_snapshot = v;
+  state.venueMissing = missing;
+  if (state.calibration) {
+    const base = lastAppliedRecord || stripCamera(state.calibration);
+    state.calibration = solveRecord(mergeVenueIntoCalibration(base, v), state.height / state.width);
+    migrateLightsToFeet(state.lights, state.calibration);
+    syncAllFixtures(state.lights, state.venue, state.calibration);
+    document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
+  }
+  structuralEdit();
+  handlesAPI?.reposition();
+  updateBadge();
+  scheduleSave();
+}
+
+async function openVenueEditorForScene() {
+  if (!state.venue || !state.venue_id) return null;
+  if (state.venueMissing) return offerRecreateVenue();
+  return openVenueEditor({
+    venue: state.venue,
+    units: state.units,
+    onSave: async (venue) => {
+      const v = await updateVenue(state.venue_id, venue);
+      adoptVenue(v);
+    },
+    onDuplicate: async (name) => {
+      const copy = await duplicateVenue(state.venue_id, name);
+      // The server gives the copy fresh position ids (positions are copied in
+      // order), so every fixture hung on the old venue follows by index.
+      const idMap = new Map((state.venue.positions || []).map((p, i) => [p.id, copy.positions?.[i]?.id]));
+      for (const L of state.lights) {
+        const pid = L.fixture?.position_id;
+        if (pid && idMap.get(pid)) L.fixture.position_id = idMap.get(pid);
+      }
+      state.venue_id = copy.id;            // the scene now points at the copy
+      adoptVenue(copy);
+    },
+    onCalibrate: () => calibPanel?.open(),   // the marks still live in the calibration panel
+    onDelete: async ({ force }) => {
+      await deleteVenue(state.venue_id, { force });   // 409 propagates to the editor
+      // Deleted: the scene keeps its embedded copy and shows "venue missing".
+      adoptVenue(state.venue_snapshot, { missing: true });
+    },
+  });
+}
+
+// "Recreate venue from snapshot": a new server record from the embedded copy.
+async function offerRecreateVenue() {
+  if (!state.venue_snapshot) return null;
+  if (!window.confirm(`Venue "${state.venue_snapshot.name}" is missing. Recreate it from this scene's copy?`)) return null;
+  try {
+    const { id, workspace_id, created_at, updated_at, ...body } = state.venue_snapshot;
+    const v = await createVenue(body);
+    state.venue_id = v.id;
+    adoptVenue(v);
+    return 'recreated';
+  } catch (e) {
+    console.warn('recreate venue failed', e);
+    setStatus('Recreate venue failed');
+    return null;
+  }
+}
+window.__openVenueEditor = openVenueEditorForScene;   // console / spec hook
 document.addEventListener('relight:units', () => rigTab?.render());
 window.__rig = { buildFixtureLight, nextOffset };   // console / spec hook (pure builders)
 
@@ -1133,8 +1204,10 @@ const NO_FIT_TITLE = 'No usable depth relief between the lip and back-line marks
 function formatBadge(rec) {
   if (!rec) return 'Calibrate';
   const u = state.units || 'ft';
-  const f = (ft) => toDisplay(ft, u).toFixed(1).replace(/\.0$/, '');
   const warn = rec.depth_fit ? '' : '⚠ ';      // spec: no depth fit is visible on the badge
+  if (state.venue && state.venueMissing) return `${warn}${state.venue.name} · venue missing ⚠`;
+  if (state.venue) return `${warn}${badgeText(state.venue, u)}`;   // Spec 2: "<venue> · W × H × D"
+  const f = (ft) => toDisplay(ft, u).toFixed(1).replace(/\.0$/, '');
   return `${warn}${f(rec.width_ft)} × ${f(rec.height_ft)} × ${f(rec.depth_ft)} ${u}`;
 }
 function updateBadge() {
@@ -1147,10 +1220,13 @@ function updateBadge() {
     ? 'Calibrate the stage so lights are placed in real-world units'
     : rec.depth_fit ? 'Stage calibration (click to edit)' : NO_FIT_TITLE;
   if (rec && state.venue) {
-    title += ` · Venue: ${state.venue.name}`;
-    if (state.venueMigrated) title += ' (created from this scene)';
-    if (state.venueMissing) title += ' (missing; using the scene snapshot)';
+    if (state.venueMissing) title = 'Recreate venue from snapshot';
+    else {
+      title = rec.depth_fit ? 'Edit the venue (click)' : `${NO_FIT_TITLE} · Venue: ${state.venue.name}`;
+      if (state.venueMigrated) title += ' · created from this scene';
+    }
   }
+  calibrateBtn.classList.toggle('is-venue-missing', !!(rec && state.venue && state.venueMissing));
   calibrateBtn.title = title;
 }
 function applyUnits(u) {
@@ -1191,11 +1267,15 @@ const calibPanel = mountCalibrationPanel({
   canvasWrapEl: document.getElementById('canvas-wrap'),
   getState: () => state,
   sampleDepth: (u, v) => depthSampler?.sample(u, v) ?? NaN,
+  getVenue: () => (rigMode(state) ? state.venue : null),
   onApply: applyCalibration,
   onClear: () => applyCalibration(null),
   onCrossCheck: crossCheckCalibration,
 });
 calibrateBtn?.addEventListener('click', () => {
   if (!state.sessionId) return;
+  // Rig mode: the badge is the venue; otherwise it is the calibration panel.
+  if (state.venue && state.venueMissing) { offerRecreateVenue(); return; }
+  if (rigMode(state)) { openVenueEditorForScene(); return; }
   calibPanel?.open();
 });

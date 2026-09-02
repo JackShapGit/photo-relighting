@@ -54,6 +54,8 @@ export function edgePlacement(L, cal, r) {
   return { x: (cx + dx * s) * r.width, y: (cy + dy * s) * r.height, angle: Math.atan2(dy, dx) };
 }
 
+let activeResizeListener = null;
+
 export function mountHandles(state, redraw, onSelect) {
   const root = document.getElementById('handles');
   root.innerHTML = '';                 // also drops any edge arrows from the previous mount
@@ -207,6 +209,11 @@ export function mountHandles(state, redraw, onSelect) {
     placeTarget(sel);
   };
   place();
+  // One live resize listener: a remount (every structural change) replaces
+  // the previous mount's, whose closure indexes handle elements that no
+  // longer match state.lights.
+  if (activeResizeListener) window.removeEventListener('resize', activeResizeListener);
+  activeResizeListener = place;
   window.addEventListener('resize', place);
 
   // ─── Position-handle drag ──────────────────────────────────────────────

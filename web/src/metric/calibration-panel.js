@@ -31,7 +31,7 @@ const isTextField = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEX
  *   Every failure (offline, timeout, model missing) is silent.
  */
 export function mountCalibrationPanel({
-  panelEl, overlayEl, canvasWrapEl, getState, sampleDepth, onApply, onClear, onCrossCheck = null,
+  panelEl, overlayEl, canvasWrapEl, getState, sampleDepth, onApply, onClear, onCrossCheck = null, getVenue = null,
 }) {
   if (!panelEl || !overlayEl) return null;
 
@@ -40,6 +40,7 @@ export function mountCalibrationPanel({
     <label>Width <input class="cal-w" type="number" step="0.1" min="0" /></label>
     <label>Height <input class="cal-h" type="number" step="0.1" min="0" /></label>
     <label>Depth <input class="cal-d" type="number" step="0.1" min="0" /></label>
+    <div class="cal-note" hidden></div>
     <div class="view-mode cal-units" role="group" aria-label="Calibration units">
       <button type="button" data-unit="ft" aria-pressed="true">ft</button>
       <button type="button" data-unit="m" aria-pressed="false">m</button>
@@ -218,6 +219,12 @@ export function mountCalibrationPanel({
     setUnits(rec?.units || st.units || 'ft', false);
     const fill = (el, ft) => { el.value = ft != null ? toDisplay(ft, units).toFixed(1) : ''; };
     fill(wIn, rec?.width_ft); fill(hIn, rec?.height_ft); fill(dIn, rec?.depth_ft);
+    // Spec 2: in a calibrated scene the dimensions are the venue's (shared by
+    // every scene that uses it); Apply writes them through to the venue.
+    const venue = typeof getVenue === 'function' ? getVenue() : null;
+    const noteEl = $('.cal-note');
+    noteEl.hidden = !venue;
+    noteEl.textContent = venue ? `Dimensions belong to venue ${venue.name} (shared by its scenes)` : '';
     marking = createMarking(rec?.marks || {});
     showErrors([]);
     // A persisted cross-check warning stays visible on reopen until re-Apply.

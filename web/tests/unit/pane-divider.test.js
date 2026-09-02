@@ -8,10 +8,10 @@ import { createDragDivider } from '../../src/split-view.js';
 
 // ── pure helpers ─────────────────────────────────────────────────────────
 
-test('defaults: 220 px minimum, 60% of the window maximum, 260 / 520 per tab', () => {
+test('defaults: 220 px minimum, 60% of the window maximum, 260 / 580 per tab', () => {
   assert.equal(MIN_PANE_WIDTH, 220);
   assert.equal(MAX_PANE_FRACTION, 0.6);
-  assert.deepEqual(DEFAULT_PANE_WIDTHS, { lights: 260, rig: 520 });
+  assert.deepEqual(DEFAULT_PANE_WIDTHS, { lights: 260, rig: 580 });
   assert.equal(LEFT_TAB_KEY, 'photo-relight:left-tab');
 });
 
@@ -41,11 +41,11 @@ test('resolveTabWidth uses a finite stored number, else the tab default', () => 
   assert.equal(resolveTabWidth('333', 'lights'), 333);
   assert.equal(resolveTabWidth(410, 'rig'), 410);
   assert.equal(resolveTabWidth(null, 'lights'), 260);
-  assert.equal(resolveTabWidth(undefined, 'rig'), 520);
-  assert.equal(resolveTabWidth('', 'rig'), 520);
+  assert.equal(resolveTabWidth(undefined, 'rig'), 580);
+  assert.equal(resolveTabWidth('', 'rig'), 580);
   assert.equal(resolveTabWidth('abc', 'lights'), 260);
-  assert.equal(resolveTabWidth('NaN', 'rig'), 520);
-  assert.equal(resolveTabWidth('Infinity', 'rig'), 520);
+  assert.equal(resolveTabWidth('NaN', 'rig'), 580);
+  assert.equal(resolveTabWidth('Infinity', 'rig'), 580);
   assert.equal(resolveTabWidth('0', 'lights'), 260, 'zero is not a usable width');
   assert.equal(resolveTabWidth('-40', 'lights'), 260);
 });
