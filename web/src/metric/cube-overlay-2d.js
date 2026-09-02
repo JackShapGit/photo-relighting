@@ -18,7 +18,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const HANDLE_R = 7;                 // 14 px handles
 const CLAMP_FLASH_MS = 300;
 const TOP_BAR = { w: 26, h: 8 };
-const EDGE_MARGIN = 10;             // an off-image house edge keeps its handle this far inside the image
+const EDGE_MARGIN = 10;             // an off-image edge or corner keeps its handle this far inside the image
 const HANDLE_KEYS = ['lipL', 'lipR', 'top', 'backL', 'backR'];
 const HANDLE_TITLES = {
   lipL: 'Lip, audience left', lipR: 'Lip, audience right', top: 'Top of the opening',
@@ -244,6 +244,7 @@ export function mountCubeOverlay({
   // "off-screen" and the wall lands where it is dropped.
   function renderHouse(cam, house, W, H, dirty, units) {
     const e = houseEdgesPx(cam, house);
+    if (!e) { houseG.toggleAttribute('hidden', true); return; }   // nothing projects this frame
     const L = e.left * W, R = e.right * W, F = e.floor * H, C = e.ceiling * H;
     setLine(houseEdgeEls.left, [L, C], [L, F], dirty);
     setLine(houseEdgeEls.right, [R, C], [R, F], dirty);
@@ -303,15 +304,21 @@ export function mountCubeOverlay({
     const P = Object.fromEntries(Object.entries(corners).map(([k, p]) => [k, px(p)]));
     EDGES.forEach(([a, b], i) => setLine(edgeEls[i], P[a], P[b], dirty));
 
+    // Stage handles: a corner that projects beyond the photo (a tall opening,
+    // a gizmo move) parks at the image edge, hollow, so it can still be
+    // grabbed; the drag then lands the mark where the pointer is.
     const hp = handlePoints(cam, dims);
+    const parkX = (x) => Math.min(W - EDGE_MARGIN, Math.max(EDGE_MARGIN, x));
+    const parkY = (y) => Math.min(H - EDGE_MARGIN, Math.max(EDGE_MARGIN, y));
     for (const key of HANDLE_KEYS) {
       const el = handleEls.get(key);
       const p = hp[key];
       if (!p) { el.setAttribute('visibility', 'hidden'); continue; }
       el.removeAttribute('visibility');
       const x = p[0] * W, y = p[1] * H;
-      if (key === 'top') placeBar(el, TOP_BAR, x, y);
-      else { el.setAttribute('cx', x.toFixed(1)); el.setAttribute('cy', y.toFixed(1)); }
+      el.classList.toggle('is-offscreen', x < 0 || x > W || y < 0 || y > H);
+      if (key === 'top') placeBar(el, TOP_BAR, parkX(x), parkY(y));
+      else { el.setAttribute('cx', parkX(x).toFixed(1)); el.setAttribute('cy', parkY(y).toFixed(1)); }
     }
 
     LABELS.forEach((spec, i) => {

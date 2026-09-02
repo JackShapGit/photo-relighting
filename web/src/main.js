@@ -1509,7 +1509,7 @@ function onCubeDrag(kind, key, uv, startUv = null) {
     return !!house && Math.abs(house[field] - want) > 1e-6;
   }
   if (!d?.marks) return false;
-  const clamped = clampStageDrag(d.marks, key, uv);
+  const clamped = clampStageDrag(d.marks, key, uv, d.dims);   // depth-aware: the camera never lands on the lip
   // The top handle only moves vertically, so only v counts as a clamp there.
   const wasClamped = (key !== 'top' && Math.abs(clamped[0] - uv[0]) > 1e-6) || Math.abs(clamped[1] - uv[1]) > 1e-6;
   dispatchDraft({ type: 'edit', patch: { marks: applyHandleDrag(d.marks, key, clamped) } });

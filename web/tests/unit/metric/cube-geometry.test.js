@@ -6,7 +6,7 @@ import {
   houseForDims, houseDragPatch, houseWidthPatch, cameraDelta,
 } from '../../../src/metric/cube-geometry.js';
 import { defaultHouse } from '../../../src/rig/geometry.js';
-import { solveCamera, validateMarks, worldToPixel, SYNTHETIC_STAGE } from '../../../src/metric/calibration.js';
+import { solveCamera, validateMarks, worldToPixel, SYNTHETIC_STAGE, Z_CAM_MIN } from '../../../src/metric/calibration.js';
 
 const { record, aspect } = SYNTHETIC_STAGE;
 const DIMS = { width_ft: record.width_ft, height_ft: record.height_ft, depth_ft: record.depth_ft };
@@ -21,14 +21,14 @@ test('stageCorners: the box [±W/2, {0,H}, {0,D}] in world feet', () => {
   assert.deepEqual(c.btl, [-20, 20, 30]); assert.deepEqual(c.btr, [20, 20, 30]);
 });
 
-test('guessCamera: dist 1.5·W, height 6, lip spans 70% of the width at v 0.72, marks valid (aspect 0.75 and 0.5625)', () => {
+test('guessCamera: dist 1.5·W, height 6, lip spans up to 70% of the width at v 0.72, marks valid (aspect 0.75 and 0.5625)', () => {
   for (const asp of [0.75, 0.5625]) {
     const cam = guessCamera(DIMS, asp);
     assert.equal(cam.dist_ft, 60); assert.equal(cam.height_ft, 6); assert.equal(cam.u_c, 0.5); assert.equal(cam.k_y, 1);
     assert.equal(cam.aspect, asp);
-    near(cam.f, 0.7 * 60 / 40);
+    if (asp === 0.75) near(cam.f, 0.7 * 60 / 40); else assert.ok(cam.f <= 0.7 * 60 / 40 + 1e-9, 'f capped so the top stays inside');
     const marks = marksFromCamera(cam, DIMS);
-    near(marks.lipR[0] - marks.lipL[0], 0.7);
+    if (asp === 0.75) near(marks.lipR[0] - marks.lipL[0], 0.7); else assert.ok(marks.lipR[0] - marks.lipL[0] <= 0.7 + 1e-9);
     near(marks.lipL[1], 0.72); near(marks.lipR[1], 0.72);
     near(marks.top[0], 0.5);
     assert.deepEqual(validateMarks({ ...DIMS, marks }), { ok: true, errors: [] });
@@ -71,7 +71,7 @@ test('clampStageDrag keeps every drag inside what validateMarks accepts', () => 
   vnear(br, [0.95, 0.54222]);
   const narrow = { lipL: [0.3, 0.7], lipR: [0.7, 0.7], top: [0.5, 0.2], backL: [0.35, 0.6], backR: [0.6, 0.6] };
   const nbr = clampStageDrag(narrow, 'backR', [0.9, 0.6]);
-  near(nbr[0], 0.35 + 0.4, 2e-3);
+  near(nbr[0], 0.35 + 0.98 * 0.4, 1e-9);            // the back stays below 98 % of the lip width
   assert.ok(nbr[0] < 0.75, 'strictly narrower than the lip');
   // top cannot cross the lip line.
   const top = clampStageDrag(m, 'top', [0.5, 0.9]);
@@ -96,6 +96,65 @@ test('clampStageDrag keeps every drag inside what validateMarks accepts', () => 
   }
   // an in-range drag passes through unchanged.
   vnear(clampStageDrag(m, 'lipR', [0.88, 0.62]), [0.88, 0.62]);
+});
+
+test('clampStageDrag composes across drags: the three-drag sequence and 500 random runs keep validateMarks ok and the camera ahead of the lip', () => {
+  const clone = (m) => JSON.parse(JSON.stringify(m));
+  const step = (marks, key, pt) => applyHandleDrag(marks, key, clampStageDrag(marks, key, pt, DIMS));
+  // The review's sequence: lipR up, backL down, lipL up — per-mean clamps let the lines cross.
+  let m = clone(record.marks);
+  m = step(m, 'lipR', [0.9, 0.543]);
+  m = step(m, 'backL', [0.23333, 0.577]);
+  m = step(m, 'lipL', [0.1, 0.561]);
+  assert.deepEqual(validateMarks({ ...DIMS, marks: m }), { ok: true, errors: [] });
+  // Fuzz: random handles to random (even off-image) points, twelve drags per run.
+  let seed = 424242;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const keys = ['lipL', 'lipR', 'top', 'backL', 'backR'];
+  const floor = 2 * Z_CAM_MIN;
+  for (let run = 0; run < 500; run++) {
+    let marks = clone(record.marks);
+    for (let i = 0; i < 12; i++) {
+      const key = keys[Math.floor(rnd() * keys.length)];
+      marks = step(marks, key, [rnd() * 1.4 - 0.2, rnd() * 1.4 - 0.2]);
+      const v = validateMarks({ ...DIMS, marks });
+      assert.ok(v.ok, `run ${run} step ${i} (${key}): ${v.errors.join('; ')}`);
+      const cam = solveCamera({ ...DIMS, marks }, aspect);
+      assert.ok([cam.f, cam.dist_ft, cam.height_ft, cam.va_h, cam.k_y].every(Number.isFinite), `run ${run} step ${i}: non-finite camera`);
+      assert.ok(cam.dist_ft >= floor - 1e-9, `run ${run} step ${i} (${key}): dist ${cam.dist_ft} below ${floor}`);
+      assert.ok(worldToPixel([0, 0, 0], cam) !== null, `run ${run} step ${i}: the lip must project`);
+    }
+  }
+  // Without dims the ratio floor still keeps the camera ahead for a 30 ft stage.
+  let n = clone(record.marks);
+  for (let i = 0; i < 40; i++) n = applyHandleDrag(n, 'backR', clampStageDrag(n, 'backR', [n.backL[0] + 0.0005, n.backR[1]]));
+  assert.ok(solveCamera({ ...DIMS, marks: n }, aspect).dist_ft >= floor - 1e-9);
+});
+
+test('houseEdgesPx returns null when the camera cannot project the proscenium plane', () => {
+  const cam = { ...solveCamera(record, aspect), dist_ft: Z_CAM_MIN / 2 };
+  const house = { left_wall_ft: -30, right_wall_ft: 30, floor_drop_ft: 3, ceiling_ft: 30, depth_ft: 60, estimated: true };
+  assert.equal(houseEdgesPx(cam, house), null);
+});
+
+test('guessCamera keeps all five handles inside the photo: 40×25 on 16:9, default dims on 2.4:1, 20×30×10 on 4:3', () => {
+  const cases = [
+    [{ width_ft: 40, height_ft: 25, depth_ft: 30 }, 0.5625],
+    [DIMS, 1 / 2.4],
+    [{ width_ft: 20, height_ft: 30, depth_ft: 10 }, 0.75],
+  ];
+  for (const [dims, asp] of cases) {
+    const cam = guessCamera(dims, asp);
+    const marks = marksFromCamera(cam, dims);
+    for (const k of Object.keys(marks)) {
+      const [u, v] = marks[k];
+      assert.ok(u >= 0.05 && u <= 0.95 && v >= 0.05 && v <= 0.95, `${k} at ${u.toFixed(3)}, ${v.toFixed(3)} for ${JSON.stringify(dims)} @ ${asp}`);
+    }
+    assert.ok(marks.top[1] >= 0.1 - 1e-9, 'top at v ≥ 0.1');
+    near(marks.lipL[1], 0.72); near(marks.lipR[1], 0.72);
+    assert.ok(marks.lipR[0] - marks.lipL[0] <= 0.7 + 1e-9 && marks.lipR[0] - marks.lipL[0] >= MIN_LIP_FRACTION);
+    assert.deepEqual(validateMarks({ ...dims, marks }), { ok: true, errors: [] });
+  }
 });
 
 test('houseEdgesPx / housePxToFt round trip on the proscenium plane; guides lean toward the camera', () => {

@@ -1280,6 +1280,7 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 }
 #cube-overlay .cube-handle.is-dragging { cursor: grabbing; }
 #cube-overlay .cube-handle.is-clamped { fill: #f66; }
+#cube-overlay .cube-stage .cube-handle.is-offscreen { fill: rgba(74, 158, 255, 0.25); stroke-dasharray: 2 2; }
 #cube-overlay .cube-label {
   fill: #fff;
   font: 600 12px system-ui, sans-serif;

@@ -17,6 +17,10 @@ const GUESS_DIST_FACTOR = 1.5;           // dist = 1.5·width
 const GUESS_CAMERA_HEIGHT_FT = 6;
 const GUESS_LIP_SPAN = 0.7;              // lip spans 70% of the image width
 const GUESS_LIP_V = 0.72;                // lip line lands at v = 0.72
+const GUESS_TOP_V_MIN = 0.1;             // ... and the top of the opening no higher than v = 0.1
+const BACK_RATIO_MIN = 0.05;             // back/lip width ratio floor (dist = D·r/(1−r) stays positive and sane)
+const BACK_RATIO_MAX = 0.98;             // ... and cap (the lip stays clearly wider than the back)
+const DIST_FLOOR_FT = 2 * Z_CAM_MIN * 1.01;   // the camera stays this far ahead of the lip (cameraFromGizmoDelta's floor, with margin)
 const HOUSE_GUIDE_FRACTION = 0.5;        // guides run toward a point 0.5·house depth toward the camera
 const CEILING_MARGIN_FT = 0.5;           // ceiling must clear the opening by at least this
 const MIN_HOUSE_DEPTH_FT = 1;
@@ -35,12 +39,16 @@ export function stageCorners({ width_ft: W, height_ft: H, depth_ft: D }) {
 
 /**
  * The default pose before any solve: a head-on camera 1.5·width away, 6 ft
- * up, focal length so the lip spans 70% of the image, lip line at v = 0.72.
+ * up, focal length so the lip spans 70% of the image (less when a tall
+ * opening or a wide photo would push the top of the opening above v = 0.1,
+ * so every handle starts inside the photo), lip line at v = 0.72.
  * A CameraModel like solveCamera's (no solve involved).
  */
-export function guessCamera({ width_ft: W, depth_ft: D }, aspect) {
+export function guessCamera({ width_ft: W, height_ft: H, depth_ft: D }, aspect) {
   const dist_ft = GUESS_DIST_FACTOR * W;
-  const f = GUESS_LIP_SPAN * dist_ft / W;
+  const fSpan = GUESS_LIP_SPAN * dist_ft / W;
+  const fTop = H > 0 ? (GUESS_LIP_V - GUESS_TOP_V_MIN) * aspect * dist_ft / H : fSpan;
+  const f = Math.min(fSpan, fTop);
   const height_ft = GUESS_CAMERA_HEIGHT_FT;
   // The lip (Y = 0, Z = 0) projects at va = va_h + height·f/dist; choose va_h so v = 0.72.
   const va_h = GUESS_LIP_V * aspect - f * height_ft / dist_ft;
@@ -67,41 +75,51 @@ export function handlePoints(cam, dims) {
 export function marksFromCamera(cam, dims) { return handlePoints(cam, dims); }
 
 /**
- * Clamp a handle drag so validateMarks can never fail: lip width ≥ 5% of the
- * image and wider than the back line, both lip corners below the top handle
- * and the back line, back corners in order and above the lip line, top above
- * the lip line at u_c. Symmetric for left/right.
+ * Clamp a handle drag so validateMarks can never fail and the solve stays
+ * sane, whatever sequence of drags came before: every corner is fenced
+ * against the OTHER corners (not their means), so each lip corner sits
+ * below both back corners and the top, each back corner above both lip
+ * corners, the top above both lip corners at u_c; the lip is at least 5%
+ * of the image wide; and the back/lip width ratio r stays within
+ * [rMin, 0.98], where rMin keeps the solved distance D·r/(1−r) at or above
+ * the camera floor (pass `dims` for the depth; without it a 5% floor
+ * applies). Symmetric for left/right.
  */
-export function clampStageDrag(marks, key, [u, v]) {
+export function clampStageDrag(marks, key, [u, v], dims = null) {
   const m = marks;
   u = clamp01(u); v = clamp01(v);
-  const lipV = (m.lipL[1] + m.lipR[1]) / 2;
-  const backV = (m.backL[1] + m.backR[1]) / 2;
   const wLip = Math.abs(m.lipR[0] - m.lipL[0]);
   const wBack = Math.abs(m.backR[0] - m.backL[0]);
-  const lipMin = Math.max(MIN_LIP_FRACTION, wBack + EPS);   // the lip must stay wider than the back
+  const D = dims?.depth_ft > 0 ? dims.depth_ft : null;
+  const rMin = Math.max(BACK_RATIO_MIN, D ? DIST_FLOOR_FT / (D + DIST_FLOOR_FT) : 0);
+  const lipMin = Math.max(MIN_LIP_FRACTION + EPS, wBack / BACK_RATIO_MAX);   // the lip stays wider than the back (and than 5%, with margin)
+  const lipMax = Math.max(lipMin, wBack / rMin);                         // ... but not so wide the camera lands on the lip
+  const lipLow = Math.min(m.lipL[1], m.lipR[1]);                         // per-corner vertical fences
+  const backHigh = Math.max(m.backL[1], m.backR[1]);
   switch (key) {
     case 'lipL':
       u = Math.min(u, m.lipR[0] - lipMin);
-      v = Math.max(v, Math.max(backV, m.top[1]) + EPS);
+      u = Math.max(u, m.lipR[0] - lipMax);
+      v = Math.max(v, Math.max(backHigh, m.top[1]) + EPS);
       break;
     case 'lipR':
       u = Math.max(u, m.lipL[0] + lipMin);
-      v = Math.max(v, Math.max(backV, m.top[1]) + EPS);
+      u = Math.min(u, m.lipL[0] + lipMax);
+      v = Math.max(v, Math.max(backHigh, m.top[1]) + EPS);
       break;
     case 'backL':
-      u = Math.min(u, m.backR[0] - EPS);
-      u = Math.max(u, m.backR[0] - wLip + EPS);
-      v = Math.min(v, lipV - EPS);
+      u = Math.min(u, m.backR[0] - rMin * wLip - EPS);
+      u = Math.max(u, m.backR[0] - BACK_RATIO_MAX * wLip);
+      v = Math.min(v, lipLow - EPS);
       break;
     case 'backR':
-      u = Math.max(u, m.backL[0] + EPS);
-      u = Math.min(u, m.backL[0] + wLip - EPS);
-      v = Math.min(v, lipV - EPS);
+      u = Math.max(u, m.backL[0] + rMin * wLip + EPS);
+      u = Math.min(u, m.backL[0] + BACK_RATIO_MAX * wLip);
+      v = Math.min(v, lipLow - EPS);
       break;
     case 'top':
       u = (m.lipL[0] + m.lipR[0]) / 2;
-      v = Math.min(v, lipV - EPS);
+      v = Math.min(v, lipLow - EPS);
       break;
     default:
       throw new Error(`unknown handle ${key}`);
@@ -123,10 +141,10 @@ export function applyHandleDrag(marks, key, [u, v]) {
  */
 export function houseEdgesPx(cam, house) {
   const { left_wall_ft: L, right_wall_ft: R, floor_drop_ft: drop, ceiling_ft: ceil, depth_ft: depth } = house;
-  const left = worldToPixel([L, 0, 0], cam)[0];
-  const right = worldToPixel([R, 0, 0], cam)[0];
-  const floor = worldToPixel([0, -drop, 0], cam)[1];
-  const ceiling = worldToPixel([0, ceil, 0], cam)[1];
+  const pl = worldToPixel([L, 0, 0], cam), pr = worldToPixel([R, 0, 0], cam);
+  const pf = worldToPixel([0, -drop, 0], cam), pc = worldToPixel([0, ceil, 0], cam);
+  if (!pl || !pr || !pf || !pc) return null;   // the proscenium plane is behind the camera: nothing to draw
+  const left = pl[0], right = pr[0], floor = pf[1], ceiling = pc[1];
   const guides = [];
   for (const [X, Y] of [[L, -drop], [L, ceil], [R, -drop], [R, ceil]]) {
     const from = worldToPixel([X, Y, 0], cam);
