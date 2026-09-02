@@ -1070,6 +1070,33 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
   color: #fff;
 }
 
+/* ─── Areas overlay (Spec 2): acting-area cells projected on the photo ── */
+#areas-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;      /* never intercepts the light handles above it */
+  z-index: 1;
+  overflow: visible;
+}
+#areas-overlay[hidden] { display: none; }
+#areas-overlay .area-cell {
+  fill: rgba(92, 208, 255, 0.08);
+  stroke: rgba(92, 208, 255, 0.9);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+#areas-overlay .area-label {
+  fill: #cfefff;
+  font: 600 13px system-ui, sans-serif;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.75);
+  stroke-width: 3px;
+}
+
 /* ─── Placement overlay (click-to-place lights) ────────────────────────── */
 #placement-overlay {
   position: absolute;

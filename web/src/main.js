@@ -7,8 +7,9 @@ import { createPlacement } from './placement.js';
 import { createDepthSampler } from './depth-sampler.js';
 import {
   loadScene3D, mount3D, notifyPlacementPhase, refreshPointCloudColor, syncLightsToScene,
-  setCalibration3D, setUnits3D, frameStage3D,
+  setCalibration3D, setUnits3D, frameStage3D, setVenue3D,
 } from './3d/index.js';
+import { mountAreasOverlay } from './areas-overlay-2d.js';
 import {
   prepare, listGobos, render as serverRender, renderLayers,
   listScenes, getScene, createScene, updateScene, renameScene,
@@ -174,6 +175,7 @@ async function syncVenueWithCalibration(record) {
     updateBadge();
     tree?.render();     // a venue-less scene just gained one: rig mode starts here
     if (rigMode(state)) setLeftTab('rig');
+    refreshVenueOverlays();
     scheduleSave();
   } catch (e) {
     console.warn('venue sync failed', e);
@@ -510,6 +512,7 @@ async function applyScene(scene) {
     const canvas = document.getElementById('canvas');
     await initRenderer(canvas);
     await setAssets(state.assetUrls, canvas);
+    setVenue3D(state.venue, state.units);          // the load builds the rig overlay with the stage
     await loadScene3D({ assetUrls: state.assetUrls, calibration: state.calibration, units: state.units });
     depthSampler = createDepthSampler(state.assetUrls.depth_png_url);
     handlesAPI = mountHandles(state, onHandlesChange, onCanvasSelect);
@@ -722,7 +725,14 @@ function adoptVenue(v, { missing = false } = {}) {
   structuralEdit();
   handlesAPI?.reposition();
   updateBadge();
+  refreshVenueOverlays();
   scheduleSave();
+}
+
+// Both overlays follow the venue: 3D cells/bars rebuilt in place, 2D areas re-projected.
+function refreshVenueOverlays() {
+  setVenue3D(state.venue, state.units);
+  areasOverlay?.render();
 }
 
 async function openVenueEditorForScene() {
@@ -784,6 +794,7 @@ async function applyVenueEdit(venue) {
   syncAllFixtures(state.lights, state.venue, state.calibration);
   structuralEdit();
   updateBadge();
+  refreshVenueOverlays();
   if (state.venue_id && !state.venueMissing) {
     try {
       const v = await updateVenue(state.venue_id, venue);
@@ -1253,11 +1264,22 @@ document.addEventListener('relight:calibration', async (e) => {
   updateBadge();
   refreshProps();
   setLeftTab(rigMode(state) ? 'rig' : 'lights');   // Rig opens with a calibrated scene
+  setVenue3D(state.venue, state.units);              // overlay built with the stage on the next load
+  areasOverlay?.render();
   await setCalibration3D(e.detail, state.units);
   syncLightsToScene(state.lights, state.selectedId);
   frameStage3D();
 });
-document.addEventListener('relight:units', (e) => setUnits3D(e.detail));
+document.addEventListener('relight:units', (e) => { setUnits3D(e.detail); areasOverlay?.render(); });
+
+// ─── 2D "Areas" overlay (Spec 2): acting-area cells projected on the photo ─
+const areasOverlay = mountAreasOverlay({
+  overlayEl: document.getElementById('areas-overlay'),
+  toggleEl: document.getElementById('show-areas'),
+  getState: () => state,
+});
+window.addEventListener('resize', () => areasOverlay?.render());
+window.__areasOverlay = areasOverlay;   // console / spec hook
 applyUnits(state.units);
 
 // ─── Calibration panel (five-click marking) ───────────────────────────────

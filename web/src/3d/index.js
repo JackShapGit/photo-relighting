@@ -12,6 +12,7 @@ import { bindHotkeys } from './hotkeys.js';
 import { isTargeted } from '../targeting.js';
 import { createTargetViz } from './target-viz.js';
 import { buildStage, removeStage, updateStageUnits } from './stage.js';
+import { removeRigOverlay, updateRigOverlay } from './rig-overlay.js';
 import { worldToEngine, effectiveFit } from '../metric/calibration.js';
 
 let api = null;
@@ -34,6 +35,7 @@ const mouse = new THREE.Vector2();
 // calibration change can rebuild the cloud), and a load sequence so an
 // overlapping rebuild cannot leave a stale cloud in the scene.
 let metricCal = null;
+let metricVenue = null;         // Spec 2 venue for the rig overlay
 let metricUnits = 'ft';
 let lastAssetUrls = null;
 let loadSeq = 0;
@@ -232,6 +234,7 @@ export async function loadScene3D({ assetUrls, calibration = null, units = 'ft' 
   primitives.clear();
   prevLights = [];
   removeStage(api.scene);
+  removeRigOverlay(api.scene);
 
   lastAssetUrls = assetUrls || null;
   metricCal = calibration || null;
@@ -253,6 +256,7 @@ export async function loadScene3D({ assetUrls, calibration = null, units = 'ft' 
 
   if (metricCal) {
     api.scene.add(buildStage(metricCal, metricUnits));
+    updateRigOverlay(api.scene, metricVenue, metricUnits);   // Spec 2: areas + hang positions (replaces any copy added while loading)
     // Stage-range bounds (the raw cloud reaches the 10 000 ft depth clamp).
     const bounds = currentPointCloud.bounds.isEmpty()
       ? new THREE.Box3().setFromObject(currentPointCloud.points)
@@ -292,7 +296,20 @@ export async function setCalibration3D(cal, units = metricUnits) {
 /** Display units for the deck grid (ft | m). */
 export function setUnits3D(units) {
   metricUnits = units === 'm' ? 'm' : 'ft';
-  if (api && metricCal) updateStageUnits(api.scene, metricCal, metricUnits);
+  if (api && metricCal) {
+    updateStageUnits(api.scene, metricCal, metricUnits);
+    updateRigOverlay(api.scene, metricVenue, metricUnits);
+  }
+}
+
+/** The scene's venue (Spec 2): drives the acting-area cells and hang
+ * position bars. Rebuilt in place when the scene is calibrated; kept for
+ * the next load otherwise. Pass null to remove. */
+export function setVenue3D(venue, units = metricUnits) {
+  metricVenue = venue || null;
+  metricUnits = units === 'm' ? 'm' : 'ft';
+  if (api && metricCal) updateRigOverlay(api.scene, metricVenue, metricUnits);
+  else if (api) removeRigOverlay(api.scene);
 }
 
 /** Re-frame the home view once lights are known (FOH fixtures extend it). */
