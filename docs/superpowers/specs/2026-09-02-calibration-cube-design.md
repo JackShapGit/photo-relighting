@@ -289,6 +289,8 @@ Ruled by the lead during implementation; each is deliberate.
   deselecting from the tree hands the gizmo back to the stage box.
 - No wireframes are drawn in an uncalibrated scene (the 3D view is in the
   engine frame there); the photo overlay still shows the default pose.
+- Off-image stage handles park hollow 10 px inside the photo edge (same treatment as house handles), so a tall opening can still be fitted.
+- The default pose caps the guessed focal length so the top of the opening starts at v ≥ 0.1; for tall openings the lip therefore spans less than 70% of the photo width.
 
 ## Roadmap note
 
