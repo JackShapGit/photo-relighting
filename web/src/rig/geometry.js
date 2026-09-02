@@ -89,6 +89,20 @@ export function mergeVenueIntoCalibration(calibration, venue) {
   };
 }
 
+// House defaults for a venue without `house` (calibration cube spec):
+// walls ±0.75·width, floor 3 ft below the deck, ceiling 10 ft above the
+// opening, house depth twice the stage depth; `estimated` until edited.
+export function defaultHouse({ width_ft, height_ft, depth_ft }) {
+  return {
+    left_wall_ft: -0.75 * width_ft,
+    right_wall_ft: 0.75 * width_ft,
+    floor_drop_ft: 3,
+    ceiling_ft: height_ft + 10,
+    depth_ft: 2 * depth_ft,
+    estimated: true,
+  };
+}
+
 export const SYNTHETIC_VENUE = {
   id: 'venue_test', name: 'Test House', width_ft: 40, height_ft: 20, depth_ft: 30,
   grid: { rows: 3, cols: 3, number_from_stage_left: false }, focus_height_ft: 5,
