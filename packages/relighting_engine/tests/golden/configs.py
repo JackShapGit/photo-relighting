@@ -86,4 +86,24 @@ def configs() -> list[tuple[str, list[Light], float, dict | None]]:
             Light(type="linear", endpoint_a_ft=(-15.0, 20.0, 26.0), endpoint_b_ft=(15.0, 20.0, 26.0),
                   intensity=7.0, softness=0.6),
         ], 0.1, CALIBRATION),
+        ("twelve_lights", twelve_lights(), 0.1, CALIBRATION),
+    ]
+
+
+def twelve_lights(intensity: float = 1.2) -> list[Light]:
+    """12 spotlights on a 4×3 front-of-house grid at 20 ft trim (Z = −6, −14,
+    −22), each aimed 20 ft upstage of itself at 5 ft (a ~37° throw). Exercises
+    the web renderer's multi-pass accumulation (more than 8 emitters); Python
+    loops over all lights.
+
+    The grid sits in front of the lip rather than over the deck because the
+    portrait fixture's normals all face the camera: straight-down units over
+    the deck graze nothing (mean luma 0.012 at 1.2, 0.017 at 3.0), whereas
+    this throw gives 0.105 at the same intensity and cone.
+    """
+    return [
+        Light(type="spotlight", position=(0.5, 0.5, 0.5), direction=(0.0, 0.0, 1.0),
+              position_ft=(float(x), 20.0, float(z)), target_ft=(float(x), 5.0, float(z + 20)),
+              intensity=intensity, cone_angle=0.35)
+        for z in (-6, -14, -22) for x in (-15, -5, 5, 15)
     ]

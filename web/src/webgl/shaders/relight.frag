@@ -21,6 +21,13 @@ uniform float u_ambient;
 uniform float u_ambient_subject;
 uniform float u_ambient_background;
 uniform int u_debugView;
+// Multi-pass accumulation (renderer.js draw): 0 = single pass straight to the
+// canvas (clamp, mask overlay, sRGB encode); 1 = write linear vec4(total, 1)
+// into the accumulation target, no clamp/overlay/encode.
+uniform int u_outputMode;
+// 1 on passes after the first: no ambient term and no reflector pass, so the
+// additive blend only adds this chunk's emitters.
+uniform int u_skipAmbient;
 
 uniform int  u_l_type[MAX_LIGHTS];
 uniform vec3 u_l_position[MAX_LIGHTS];
@@ -178,6 +185,10 @@ float sample_gobo(int i, vec2 uv) {
   return 1.0;
 }
 
+// Shared output stage (clamp + mask overlay + sRGB encode) is injected here by
+// renderer.js so this program and the multi-pass blit encode identically.
+//__OUTPUT_STAGE__
+
 void main() {
   vec3 original = texture(u_original, v_uv).rgb;  // already linear (sRGB sampler)
   float depth = texture(u_depth, v_uv).r;
@@ -202,7 +213,8 @@ void main() {
   // low-confidence regions still get ambient illumination from the original.
   // Per-zone ambient: subject vs background blended by mask. When no mask is
   // present we fall back to the global ambient.
-  float ambient_v = u_haveMask == 1
+  float ambient_v = u_skipAmbient == 1 ? 0.0
+    : u_haveMask == 1
     ? mix(u_ambient_background, u_ambient_subject, maskV)
     : u_ambient;
   vec3 total = ambient_v * original;
@@ -279,6 +291,7 @@ void main() {
   }
 
   for (int i = 0; i < MAX_REFLECTORS; i++) {
+    if (u_skipAmbient == 1) break;               // reflectors are accumulated once, in pass 1
     if (i >= u_reflectorCount) break;
     if (u_r_enabled[i] == 0) continue;
 
@@ -318,21 +331,11 @@ void main() {
     total += maskAffect * (diffuse_c + glossy_c);
   }
 
-  total = clamp(total, vec3(0.0), vec3(1.0));
-  // Refine-mode mask overlay: blend a translucent blue over masked pixels so
-  // the user can see what's currently selected. Applied in linear space then
-  // sRGB-encoded below with everything else.
-  if (u_maskOverlay == 1 && u_haveMask == 1) {
-    vec3 tint = vec3(0.18, 0.45, 0.95);
-    total = mix(total, tint, maskV * 0.45);
+  if (u_outputMode == 1) {
+    // Linear accumulation pass: the blit program applies output_stage once
+    // all chunks have been summed.
+    fragColor = vec4(total, 1.0);
+    return;
   }
-  // Linear → sRGB (IEC 61966-2-1 piecewise) — matches engine io._linear_to_srgb.
-  // Without this, the canvas backbuffer (RGBA8, no sRGB framebuffer) makes linear
-  // mid-tones display ~2× too dark vs the exported PNG (which is sRGB-encoded + ICC-tagged).
-  vec3 srgb = mix(
-    total * 12.92,
-    (1.0 + 0.055) * pow(max(total, vec3(1e-6)), vec3(1.0 / 2.4)) - 0.055,
-    step(vec3(0.0031308), total)
-  );
-  fragColor = vec4(srgb, 1.0);
+  fragColor = vec4(output_stage(total, maskV), 1.0);
 }

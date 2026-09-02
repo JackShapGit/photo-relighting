@@ -7,6 +7,7 @@ const FIXTURE = path.resolve('packages/relighting_engine/tests/fixtures/images/p
 const GOLDEN = path.resolve('packages/relighting_engine/tests/fixtures/expected/portrait_a__single_directional.png');
 const GOLDEN_CAL = path.resolve('packages/relighting_engine/tests/fixtures/expected/portrait_a__calibrated_foh_spot.png');
 const GOLDEN_LIN = path.resolve('packages/relighting_engine/tests/fixtures/expected/portrait_a__linear_cyc.png');
+const GOLDEN_12 = path.resolve('packages/relighting_engine/tests/fixtures/expected/portrait_a__twelve_lights.png');
 
 // Tolerance for WebGL vs Python: per-pixel YIQ threshold 0.1, at most 2 % of
 // pixels may differ. The goldens under fixtures/expected are the snapshots
@@ -160,4 +161,39 @@ test('WebGL linear (cyc) render matches Python golden within tolerance', async (
 
   const webglPng = await captureCanvas(page, 'webgl_linear.png');
   expect(webglPng).toMatchSnapshot(['portrait_a__linear_cyc.png'], PARITY);
+});
+
+test('WebGL multi-pass (12 lights) render matches Python golden within tolerance', async ({ page }) => {
+  test.skip(!fs.existsSync(FIXTURE) || !fs.existsSync(GOLDEN_12), 'fixtures missing');
+
+  await uploadFixture(page);
+
+  // Matches the "twelve_lights" golden config in configs.py: 12 spotlights on
+  // a 4×3 front-of-house grid at 20 ft trim (Z −6/−14/−22), each aimed 20 ft
+  // upstage at 5 ft; more than 8 emitters, so the renderer accumulates two
+  // passes and blits.
+  const passes = await page.evaluate(() => {
+    const s = window.__state;
+    s.calibration = { version: 1, units: 'ft', width_ft: 40, height_ft: 20, depth_ft: 30,
+      marks: { lipL: [0.1, 0.61333], lipR: [0.9, 0.61333], top: [0.5, 0.08], backL: [0.23333, 0.54222], backR: [0.76667, 0.54222] },
+      depth_fit: { a: -0.027778, b: 0.030556 }, depth_check: null };
+    window.__applyCalibration();
+    const lights = [];
+    for (const z of [-6, -14, -22]) for (const x of [-15, -5, 5, 15]) {
+      lights.push({ type: 'spotlight', position: [0.5, 0.5, 0.5], direction: [0, 0, 1], target: null,
+        position_ft: [x, 20, z], target_ft: [x, 5, z + 20], intensity: 1.2, falloff: 1.0, cone_angle: 0.35, softness: 0.1,
+        color: [1,1,1], color_temperature: null, gel_preset: null, gobo: null, affects: 'all', enabled: true });
+    }
+    s.lights = lights;
+    window.__syncMetricLights();
+    s.ambient = 0.1;
+    window.__redraw();
+    return lights.length;
+  });
+  expect(passes).toBe(12);
+  mark('twelve lights applied + redraw');
+  await page.waitForTimeout(300);
+
+  const webglPng = await captureCanvas(page, 'webgl_twelve.png');
+  expect(webglPng).toMatchSnapshot(['portrait_a__twelve_lights.png'], PARITY);
 });
