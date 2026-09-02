@@ -43,13 +43,19 @@ export function targetSpawnPoint(light, dist = TARGET_SPAWN_DIST) {
 // Recompute + store the derived direction in place when targeted; no-op
 // otherwise. Call after any change to a light's target or position.
 export function applyTargeting(light) {
-  if (isTargeted(light)) light.direction = deriveDirection(light);
-  // Calibrated lights carry a feet-space target too; derive the feet direction
-  // from it so the metric renderer aims the same way.
+  // Calibrated lights carry a feet-space target: the beam is derived in feet
+  // and the engine direction is its flip (x, -y, -z), so the server and the
+  // shader march shadows along the same vector. Engine target − position is
+  // a perspective-warped vector and must not override it.
   if (light.position_ft && light.target_ft) {
     const d = [0, 1, 2].map((i) => light.target_ft[i] - light.position_ft[i]);
     const n = Math.hypot(...d);
-    if (n > EPS) light.direction_ft = d.map((c) => c / n);
+    if (n > EPS) {
+      light.direction_ft = d.map((c) => c / n);
+      light.direction = [light.direction_ft[0], -light.direction_ft[1], -light.direction_ft[2]];
+      return light;
+    }
   }
+  if (isTargeted(light)) light.direction = deriveDirection(light);
   return light;
 }

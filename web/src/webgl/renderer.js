@@ -3,6 +3,7 @@
 // Public API: init(canvas), setAssets(urls), setLights(lights, ambient), draw().
 
 import { computeReflectorEmission } from './reflector-emission.js';
+import { effectiveFit, engineToWorld, engineDirToWorld } from '../metric/calibration.js';
 
 let gl, program, vao, locs;
 let texOriginal, texDepth, texNormals, texMask, texConfidence;
@@ -226,8 +227,7 @@ export function draw(state) {
   const reflEmission = computeReflectorEmission(allLights);
 
   state.gelResolved = emitters.map(L => ({ ...L, color: resolveColor(L) }));
-  emitters.metricMode = !!(cal && cal.camera);
-  uploadLights(emitters, state.gelResolved || emitters);
+  uploadLights(emitters, state.gelResolved || emitters, cal && cal.camera ? cal : null);
   uploadReflectors(reflectors, reflEmission);
 
   gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -237,7 +237,7 @@ function encodeDebugView(v) {
   return { render: 0, depth: 1, normals: 2, mask: 3 }[v] ?? 0;
 }
 
-function uploadLights(lights, lightsResolved) {
+function uploadLights(lights, lightsResolved, cal = null) {
   const N = Math.min(lights.length, 8);
   gl.uniform1i(locs.u_lightCount, N);
   // Pack arrays
@@ -247,18 +247,22 @@ function uploadLights(lights, lightsResolved) {
   const cone = new Float32Array(8), soft = new Float32Array(8);
   const affects = new Int32Array(8), enabled = new Int32Array(8), hasGobo = new Int32Array(8);
   // Metric mode: lighting-space arrays carry feet (position_ft/direction_ft,
-  // set by the sync helper); engine-space proxies drive shadow marching.
+  // set by the sync helper; a light that still lacks them is derived from its
+  // engine position the same way the Python engine does). Shadow marching
+  // uses the engine proxy position and the engine `direction` field — the
+  // very field the server receives, so both march along one vector.
   const posEng = new Float32Array(8 * 3), dirEng = new Float32Array(8 * 3);
   const shadowDir = new Int32Array(8);
-  const metric = !!(lights.metricMode);
+  const metric = !!cal;
+  const fit = metric ? effectiveFit(cal) : null;
   for (let i = 0; i < N; i++) {
     const L = lights[i], R = lightsResolved[i] ?? L;
     types[i] = { directional: 0, point: 1, spotlight: 2 }[L.type];
-    const posSrc = metric && L.position_ft ? L.position_ft : L.position;
-    const dirSrc = metric && L.direction_ft ? L.direction_ft : L.direction;
+    const posSrc = metric ? (L.position_ft || engineToWorld(L.position, cal.camera, fit)) : L.position;
+    const dirSrc = metric ? (L.direction_ft || engineDirToWorld(L.direction)) : L.direction;
     pos.set(posSrc, i * 3); dir.set(dirSrc, i * 3); col.set(R.color, i * 3);
     posEng.set(L.position_eng || L.position, i * 3);
-    dirEng.set(L.direction_eng || L.direction, i * 3);
+    dirEng.set(L.direction, i * 3);
     shadowDir[i] = metric && !L.position_eng ? 1 : 0;
     intensity[i] = L.intensity;
     falloff[i] = metric && L.falloff_ft != null ? L.falloff_ft : L.falloff;

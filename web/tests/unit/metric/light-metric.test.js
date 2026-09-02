@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { solveRecord, syncLightFromFeet, syncLightFromEngine, migrateLightsToFeet, clearMetric } from '../../../src/metric/light-metric.js';
+import {
+  solveRecord, syncLightFromFeet, syncLightFromEngine, migrateLightsToFeet, clearMetric,
+  syncLightsFromEngineEdits, clampEnginePosition,
+} from '../../../src/metric/light-metric.js';
 import { SYNTHETIC_STAGE } from '../../../src/metric/calibration.js';
 
 const near = (a, b, tol = 1e-6) => assert.ok(Math.abs(a - b) <= tol, `${a} !~ ${b}`);
@@ -65,3 +68,81 @@ test('clearMetric removes metric fields', () => {
   clearMetric(L);
   for (const k of ['position_ft', 'target_ft', 'direction_ft', 'position_eng', 'direction_eng', 'falloff_ft']) assert.equal(k in L, false);
 });
+
+// ── Engine-space edits (aim toggle, Direction Z slider, 2D direction handle)
+// must re-derive the feet fields through one central sync (final review C1).
+
+function calibratedSpot() {
+  const L = { type: 'spotlight', position: [0.5, 0.6, 0.8], direction: [0, 0, -1], target: null, falloff: 1 };
+  migrateLightsToFeet([L], record);
+  return L;
+}
+
+test('syncLightsFromEngineEdits: an engine direction change updates direction_ft', () => {
+  const L = calibratedSpot();
+  const before = L.direction_ft.slice();
+  L.direction = [0.6, 0, -0.8];                    // Direction Z slider / 2D direction handle
+  syncLightsFromEngineEdits([L], record);
+  assert.notDeepEqual(L.direction_ft, before);
+  assert.ok(vclose(L.direction_ft, [0.6, 0, 0.8]));
+  assert.deepEqual(L.direction, L.direction_eng, 'engine direction is canonical after the sync');
+});
+
+test('syncLightsFromEngineEdits: aim on spawns target_ft down the beam (no jump), aim off drops it', () => {
+  const L = calibratedSpot();
+  const beam = L.direction_ft.slice(), dirBefore = L.direction.slice();
+  L.target = [L.position[0], L.position[1], L.position[2] - 1];   // aim toggle on (engine spawn)
+  syncLightsFromEngineEdits([L], record);
+  assert.ok(Array.isArray(L.target_ft), 'target_ft exists');
+  const expected = [0, 1, 2].map((i) => L.position_ft[i] + beam[i] * 0.5 * record.camera.dist_ft);
+  assert.ok(vclose(L.target_ft, expected, 1e-9), 'spawned half a camera distance down the beam');
+  assert.ok(vclose(L.direction_ft, beam, 1e-9) && vclose(L.direction, dirBefore, 1e-9), 'beam did not jump');
+  assert.ok(Array.isArray(L.target), 'engine target re-derived from the feet target');
+  // Target-handle drag: the engine target moves, the feet target follows.
+  L.target = [L.target[0] + 0.05, L.target[1], L.target[2]];
+  const tftBefore = L.target_ft.slice();
+  syncLightsFromEngineEdits([L], record);
+  assert.ok(!vclose(L.target_ft, tftBefore, 1e-9), 'target_ft re-derived after a target drag');
+  L.target = null;                                                 // aim toggle off
+  syncLightsFromEngineEdits([L], record);
+  assert.equal('target_ft' in L, false, 'target_ft dropped');
+  assert.ok(Array.isArray(L.direction_ft));
+});
+
+test('syncLightsFromEngineEdits: a behind-camera light keeps its feet position and spawns a feet target', () => {
+  const L = { type: 'spotlight', position: [0.5, 0.5, 0.5], direction: [0, 0, -1], target: null, falloff: 1,
+    position_ft: [0, 20, -60] };
+  syncLightFromFeet(L, record);
+  assert.equal(L.position_eng, null);
+  L.target = [0.5, 0.5, -0.5];
+  syncLightsFromEngineEdits([L], record);
+  assert.deepEqual(L.position_ft, [0, 20, -60], 'position_ft untouched');
+  assert.ok(Array.isArray(L.target_ft) && L.target_ft[2] > -60, 'target spawned down the beam in feet');
+});
+
+test('syncLightsFromEngineEdits: a light without position_ft is migrated; reflectors are skipped', () => {
+  const L = { type: 'point', position: [0.5, 0.5, 0.5], direction: [0, 0, -1], target: null, falloff: 1 };
+  const R = { type: 'reflector', position: [0.5, 0.5, 0.5], direction: [0, 0, -1], normal: [0, 0, 1] };
+  syncLightsFromEngineEdits([L, R], record);
+  assert.ok(Array.isArray(L.position_ft) && Array.isArray(L.position_eng));
+  assert.equal('position_ft' in R, false);
+});
+
+test('syncLightFromFeet: engine direction always equals direction_eng, even behind the camera', () => {
+  const L = { type: 'spotlight', position: [0.5, 0.5, 0.5], direction: [0.3, 0.3, 0.3], target: null, falloff: 1,
+    position_ft: [0, 20, -60], direction_ft: [0, -0.6, 0.8] };
+  syncLightFromFeet(L, record);
+  assert.equal(L.position_eng, null);
+  assert.deepEqual(L.direction, L.direction_eng);
+});
+
+test('clampEnginePosition brings an off-frame engine position back into reach', () => {
+  const L = { position: [1.7, -0.3, 5] };
+  clampEnginePosition(L);
+  assert.deepEqual(L.position, [0.98, 0.02, 3]);
+  const M = { position: [0.4, 0.5, -9] };
+  clampEnginePosition(M);
+  assert.deepEqual(M.position, [0.4, 0.5, -2]);
+});
+
+const vclose = (a, b, eps = 1e-9) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= eps);

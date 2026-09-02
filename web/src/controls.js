@@ -334,6 +334,10 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
       // does not re-render the props panel, so we update this DOM in place).
       $('.direction-z').disabled = e.target.checked;
       if (onStructural) onStructural();   // remount 2D handles, sync 3D, save
+      // In a calibrated scene the structural sync just created or dropped
+      // target_ft (and re-derived the direction), so the Target fields and the
+      // Direction Z slider must be re-rendered to match.
+      if (metric) renderLightProps(L, slotIdx, container, redraw, onStructural, state);
     });
   }
   bind('.intensity', (t) => { L.intensity = parseFloat(t.value); });

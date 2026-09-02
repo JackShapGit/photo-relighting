@@ -32,8 +32,8 @@ import { openScenesListModal } from './scenes-list-modal.js';
 import { createSplitView } from './split-view.js';
 import {
   solveRecord, syncLightFromFeet, syncLightFromEngine, migrateLightsToFeet, clearMetric,
+  syncLightsFromEngineEdits, clampEnginePosition,
 } from './metric/light-metric.js';
-import { worldToEngine, effectiveFit } from './metric/calibration.js';
 import { toDisplay } from './metric/units.js';
 import { mountCalibrationPanel } from './metric/calibration-panel.js';
 import { mountPlacement2D } from './placement-pane-2d.js';
@@ -151,6 +151,7 @@ const redraw = () => {
   refreshPointCloudColor();
 };
 const redrawAndSave = () => {
+  syncDraggedLights();                 // engine-space edits re-derive feet fields first
   redraw();
   syncLightsToScene(state.lights, state.selectedId);
   scheduleSave();
@@ -184,24 +185,11 @@ function updatePlacedLight(L) {
   onChange();
 }
 
-// 2D handle drags edit position/target in engine space. Find the lights whose
-// engine position (or target) no longer matches their metric proxy and
-// re-derive their feet fields. Lights without a projection (position_eng null,
-// e.g. FOH lights behind the camera plane) keep their feet position.
-const vecEq = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length
-  && a.every((v, i) => v === b[i]);
+// Every engine-space edit (2D handle/target drags, Direction Z slider, the
+// aim-at-target toggle, newly added lights) funnels through here before a
+// redraw or save, so the feet fields the metric renderer reads never lag.
 function syncDraggedLights() {
-  const cal = state.calibration;
-  if (!cal) return;
-  const fit = effectiveFit(cal);          // linear fallback when there is no depth fit
-  for (const L of state.lights) {
-    if (L.type === 'reflector' || !L.position_eng) continue;
-    const targetEng = L.target_ft ? worldToEngine(L.target_ft, cal.camera, fit) : null;
-    const moved = !vecEq(L.position, L.position_eng)
-      || (Array.isArray(L.target) && targetEng && !vecEq(L.target, targetEng))
-      || (Array.isArray(L.target) !== Boolean(L.target_ft));
-    if (moved) syncLightFromEngine(L, cal);
-  }
+  if (state.calibration) syncLightsFromEngineEdits(state.lights, state.calibration);
 }
 const onHandlesChange = () => { syncDraggedLights(); redrawAndSave(); };
 
@@ -283,6 +271,7 @@ function onPickPreset(preset) {
 const onChange = () => {
   invalidatePolish();
   syncLights(state);
+  syncDraggedLights();
   if (state.sessionId) {
     handlesAPI = mountHandles(state, onHandlesChange, onCanvasSelect);
     redraw();
@@ -859,9 +848,10 @@ function applyCalibration(record) {
   lastAppliedRecord = record || null;
   state.calibration = record ? solveRecord(record, state.height / state.width) : null;
   if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
-  else for (const L of state.lights) clearMetric(L);
+  else for (const L of state.lights) { clearMetric(L); clampEnginePosition(L); }   // keep FOH lights reachable
   document.dispatchEvent(new CustomEvent('relight:calibration', { detail: state.calibration }));
   redrawAndSave();
+  handlesAPI?.reposition();   // edge arrows / hidden handles follow the calibration state
 }
 
 // Server-side metric-depth cross-check of a just-applied record. Persists
