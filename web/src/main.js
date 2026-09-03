@@ -417,6 +417,7 @@ const measure2D = mountMeasure2D({
 function setMeasureArmed(on) {
   if (on) {
     if (placement?.isActive()) placement.cancel();   // one modal capture at a time
+    if (state.refineMode) setRefineMode(false);       // ditto, vs. Refine Mask
     measureTool.arm();
   } else {
     measureTool.disarm();
@@ -1104,6 +1105,7 @@ const refineClearBtn = document.getElementById('refine-clear-btn');
 const refineOverlay = document.getElementById('refine-overlay');
 
 function setRefineMode(on) {
+  if (on && measureTool.isArmed()) setMeasureArmed(false);   // one modal capture at a time
   state.refineMode = !!on;
   state.refinePoints = state.refinePoints || [];
   refineBtn.classList.toggle('active', state.refineMode);

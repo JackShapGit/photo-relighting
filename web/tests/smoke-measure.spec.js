@@ -168,3 +168,66 @@ test('ruler 2D: the capture layer wins over the stage box handles underneath it'
 
   expect(errors).toEqual([]);
 });
+
+test('ruler 2D: Escape mid-span cancels the partial first, then exits on a second press', async ({ page }) => {
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-escape');
+
+  await page.locator('#measure-btn').click();
+  await expect(page.locator('#measure-btn')).toHaveAttribute('aria-pressed', 'true');
+
+  const wrap = await page.locator('#canvas-wrap').boundingBox();
+  const at = (fx, fy) => [wrap.x + wrap.width * fx, wrap.y + wrap.height * fy];
+  await page.mouse.move(...at(0.5, 0.5));
+
+  // One point placed, no span committed yet (awaitingB).
+  await page.mouse.click(...at(0.4, 0.6));
+  await expect(page.locator('#measure-overlay')).not.toHaveAttribute('hidden', '');
+
+  // First Escape: cancels the partial span but stays armed (Task 5's
+  // cancel/disarm split -- this is the awaitingB -> cancel() branch, which
+  // the two-click "draws a labelled measurement" test never exercises since
+  // it always completes each span before pressing Escape).
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#measure-btn')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(0);
+
+  // A fresh span still works after the cancel -- the tool really did stay armed.
+  await page.mouse.click(...at(0.3, 0.6));
+  await page.mouse.click(...at(0.6, 0.6));
+  await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(1);
+
+  // Second Escape: nothing partial left, so this one exits the tool.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#measure-btn')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(1);   // kept
+
+  expect(errors).toEqual([]);
+});
+
+test('ruler 2D: Measure and Refine Mask exclude each other', async ({ page }) => {
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-refine-excl');
+
+  const refineBtn = page.locator('#refine-mask-btn');
+  const measureBtn = page.locator('#measure-btn');
+
+  // Refine Mask on, then arm Measure: Refine Mask must actually turn off,
+  // not just let the click land somewhere.
+  await refineBtn.click();
+  await expect(refineBtn).toHaveClass(/active/);
+  await expect(page.locator('#refine-overlay')).not.toHaveAttribute('hidden', '');
+
+  await measureBtn.click();
+  await expect(measureBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect(refineBtn).not.toHaveClass(/active/);
+  await expect(page.locator('#refine-overlay')).toHaveAttribute('hidden', '');
+
+  // Reverse direction: Measure already armed (from above), enabling Refine
+  // Mask must disarm it -- the other half of the exclusivity guard.
+  await refineBtn.click();
+  await expect(refineBtn).toHaveClass(/active/);
+  await expect(measureBtn).toHaveAttribute('aria-pressed', 'false');
+
+  expect(errors).toEqual([]);
+});
