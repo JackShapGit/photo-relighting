@@ -363,4 +363,33 @@ behaviour a user could not predict.
 
 ## Deviations (as implemented)
 
-To be filled in during implementation.
+### Production behaviour changed beyond what the spec described
+
+- **Hung fixtures now get a default aim at stage centre** (`buildFixtureLight`, Task 4). Before this, every unaimed rig fixture inherited a horizontal `fill` direction, so its throw/diameter readouts could never resolve to a number until the designer manually assigned an Area — the readout columns and the props-pane block would sit at "—" for every fixture on the rig by default, defeating their purpose. A hung fixture's default `direction_ft` now points at stage centre at focus height; Custom (unhung) fixtures keep the prior generic default, since there's no position to aim from.
+- **Default rig pane width raised from 580 to 670px**, to keep the fixtures table free of horizontal scroll once the Throw and Field Ø columns were added (Task 2/3).
+- **Header layout fix:** `.view-mode` (both `#view-mode`, the 2D | Split | 3D control, and `#unit-toggle`) no longer shrinks (`flex-shrink: 0`), and `.calib-badge` truncates with an ellipsis instead (`min-width: 0; overflow: hidden; text-overflow: ellipsis`). Discovered during Task 9: `overflow: hidden` on `.view-mode` with no `flex-shrink: 0` dropped its flexbox automatic minimum width to zero, so both segmented controls collapsed to ~2px and became unclickable whenever the header's content exceeded the 1600px viewport in rig mode with a long calibrate badge (e.g. `"<scene> · 40 × 20 × 30 ft"`) — latent since Task 6 added the Measure/Clear buttons pushed header content past that threshold, never exercised by any test until Task 9's own `units:` test tried to click the header toggle. Fixed in-task per explicit ruling, since it made a real control unclickable in ordinary use, not only a blocked test.
+- **`#measure-overlay`/`#measure-capture` z-index** (`z-index: 1` / `z-index: 5`, matching the `#placement-overlay` precedent) and **Measure/Refine Mask mutual exclusivity** — the two full-bleed pointer-capturing modes are guarded so entering one disarms the other, avoiding mutual recursion by construction (Task 6, fix round in Task 6).
+- **Calibration panel dimension and house field labels gained a `(${units})` suffix** (Task 9). The Width/Height/Depth and house fields already converted their numeric values correctly on unit toggle, but the labels never stated which unit — the same defect class as the props-pane readout gap (M5) below, found independently on this second surface during the Task 9 audit. Because the panel's markup is built once at mount and never rebuilt (unlike `venue-editor.js`, which rebuilds on every open), the fix is a live DOM update inside `setUnits`, not static interpolation.
+
+### Copy and wording
+
+- The `no-beam` tooltip was generalised from the spec's cyc-specific example ("A cyc has no beam angle") to **"No usable beam angle for this fixture"**, because the code path also covers reflectors and out-of-range hand-edited cone angles, not only cycs (Task 1).
+- Props-pane readout block labels gained a `(${units})` suffix (`Throw (${units})` / `Field Ø (${units})`) to match the fixtures table's column headers, which already stated the unit — this was the known gap M5, closed in Task 9.
+
+### Deferred, with reasons
+
+- The Sprite shared-geometry dispose that `measure-overlay.js` inherited from `rig-overlay.js`'s pattern — pre-existing scope, not introduced by this plan, left as-is for consistency with the rest of the 3D overlay code.
+- `measure-overlay-2d.js`'s `render()` rebuilds the whole SVG on every pointermove rather than patching in place — acceptable at the scale of a single in-progress ruler segment, deferred as a perf concern only if profiling ever shows it matters.
+- `measureTool`'s `cancel()`/`disarm()` fire `onChange` even on a true no-op (e.g. disarming when already disarmed) — harmless (all consumers are idempotent re-renders) but not worth the extra guard clause for a currently-invisible case.
+- The latent z-index tie between `#measure-capture` and `#refine-overlay` (both effectively claiming the same modal-capture layer precedence) — resolved for the two modes that exist today via the mutual-exclusivity guard rather than a hard z-index ordering; a future third full-bleed capture layer would need to actually resolve the ordering, not just add another pairwise exclusivity guard.
+
+### Run-wide finding: GitNexus index is stale
+
+GitNexus's index for this repo is pinned at commit `905d768`, well behind the branch's current tip. Confirmed directly: symbols GitNexus reported as "touched" during Task 9 (`updatePrompt`, `startDrag`/its nested `move`, `onOverlayPointerDown` in `calibration-panel.js`) exist in the file as of `905d768` but not in the file as it stands today — the tool was reporting against a deleted/superseded revision, not the actual diff. Every "line-shift artifact" dismissal made against `detect_changes`/`impact` output this run (`openLoadPicker`, `renderReflectorProps`, `escapeHtml`, `uploadFixture`, `record`, `done`, and the calibration-panel closures above) should be read with this in mind — some may equally have been symbols that no longer exist rather than symbols that merely moved. A future reader relying on this tool's symbol-level output for this branch should re-index first (`node .gitnexus/run.cjs analyze --index-only`) rather than trust it as-is.
+
+### Final test counts (branch tip `a691cf1`, plus this spec commit)
+
+- `npm run test:unit`: **235 passed**, 0 failed.
+- `python -m pytest packages/relighting_engine -q`: **154 passed, 69 skipped**.
+- `python -m pytest packages/relighting_api -q`: **131 passed**.
+- `npx playwright test --config=web/tests/playwright.config.js` (workers=1): **17 passed** — 4 parity goldens, 5 pre-existing smokes, 8 in `smoke-measure.spec.js` (readouts, ruler 2D ×4, ruler 3D, measurements-clear, units).
