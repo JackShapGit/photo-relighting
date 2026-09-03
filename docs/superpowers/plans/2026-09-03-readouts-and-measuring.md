@@ -1285,8 +1285,13 @@ Also disarm Measure at the top of the add-light flow that calls `placement.begin
 - [ ] **Step 3d: Style it**
 
 ```css
-#measure-overlay { position: absolute; inset: 0; pointer-events: none; }
-#measure-capture { position: absolute; inset: 0; cursor: crosshair; }
+/* z-index 1 matches #areas-overlay and #cube-overlay, so measurement labels
+   paint above #handles. z-index 5 matches #placement-overlay, the existing
+   modal capture layer: without it the capture div sits below #cube-overlay
+   (z-index 1) whose .cube-handle elements are pointer-events:all, so a
+   stage-box handle stays draggable while the ruler is armed. */
+#measure-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+#measure-capture { position: absolute; inset: 0; cursor: crosshair; z-index: 5; }
 .measure-line { stroke: #ffd166; stroke-width: 1.5; }
 .measure-line.is-pending { stroke-dasharray: 4 3; opacity: .8; }
 .measure-label { fill: #ffd166; font: 11px system-ui, sans-serif; text-anchor: middle;
