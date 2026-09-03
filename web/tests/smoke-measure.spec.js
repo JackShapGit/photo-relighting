@@ -121,3 +121,50 @@ test('ruler 2D: two clicks draw a labelled measurement and a second one persists
 
   expect(errors).toEqual([]);
 });
+
+test('ruler 2D: the capture layer wins over the stage box handles underneath it', async ({ page }) => {
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-capture-order');
+
+  // Stage box is on by default, so its handles sit in the same pane the
+  // ruler captures clicks from.
+  await expect(page.locator('#show-stage-box')).toBeChecked();
+  const before = await page.evaluate(() => {
+    const d = window.__calDraft();
+    return { lipR: d.draft.marks.lipR.slice(), dirty: d.dirty };
+  });
+  expect(before.dirty).toBe(false);
+
+  await page.locator('#measure-btn').click();
+  await expect(page.locator('#measure-btn')).toHaveAttribute('aria-pressed', 'true');
+
+  // A real drag AT the lip-right cube handle's own position -- the same
+  // gesture smoke-cube.spec.js uses to move it. If #measure-capture is above
+  // #cube-overlay, this becomes the ruler's first point and the box does not
+  // move; if the layers are mis-stacked, the handle drags instead and no
+  // ruler point is taken.
+  const lipR = page.locator('.cube-handle[data-key="lipR"]');
+  const box = await lipR.boundingBox();
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  for (let i = 1; i <= 6; i++) await page.mouse.move(cx + i * 10, cy, { steps: 2 });
+  await page.mouse.up();
+
+  const after = await page.evaluate(() => {
+    const d = window.__calDraft();
+    return { lipR: d.draft.marks.lipR.slice(), dirty: d.dirty };
+  });
+  expect(after.lipR).toEqual(before.lipR);
+  expect(after.dirty).toBe(false);
+
+  // Complete the span with a second, ordinary click. If the first click (at
+  // the handle) had been swallowed by the cube handle instead of the ruler,
+  // the tool would still be waiting for point A here and this would produce
+  // no measurement.
+  const wrap = await page.locator('#canvas-wrap').boundingBox();
+  await page.mouse.click(wrap.x + wrap.width * 0.5, wrap.y + wrap.height * 0.8);
+  await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(1);
+
+  expect(errors).toEqual([]);
+});

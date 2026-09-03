@@ -1126,8 +1126,8 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 }
 
 /* ─── Ruler (Spec 3): 2D photo-pane measurement overlay ────────────────── */
-#measure-overlay { position: absolute; inset: 0; pointer-events: none; }
-#measure-capture { position: absolute; inset: 0; cursor: crosshair; }
+#measure-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+#measure-capture { position: absolute; inset: 0; cursor: crosshair; z-index: 5; }
 .measure-line { stroke: #ffd166; stroke-width: 1.5; }
 .measure-line.is-pending { stroke-dasharray: 4 3; opacity: .8; }
 .measure-label { fill: #ffd166; font: 11px system-ui, sans-serif; text-anchor: middle;
