@@ -231,3 +231,18 @@ test('ruler 2D: Measure and Refine Mask exclude each other', async ({ page }) =>
 
   expect(errors).toEqual([]);
 });
+
+test('ruler 3D: two clicks in the viewport draw a measurement', async ({ page }) => {
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-ruler3d');
+
+  await page.locator('#measure-btn').click();
+  const box = await page.locator('#canvas3d').boundingBox();
+  const at = (fx, fy) => [box.x + box.width * fx, box.y + box.height * fy];
+  await page.mouse.move(...at(0.5, 0.5));          // calibration probe
+  await page.mouse.click(...at(0.35, 0.60));
+  await page.mouse.click(...at(0.65, 0.60));
+
+  await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(1);
+  expect(errors).toEqual([]);
+});

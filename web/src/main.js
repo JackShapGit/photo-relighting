@@ -8,6 +8,7 @@ import { createDepthSampler } from './depth-sampler.js';
 import {
   loadScene3D, mount3D, notifyPlacementPhase, refreshPointCloudColor, syncLightsToScene,
   setCalibration3D, setUnits3D, frameStage3D, setVenue3D, setCubes3D, attachStageBoxGizmo, detachStageBoxGizmo,
+  setMeasureTool3D, setMeasureArmed3D, renderMeasure3D,
 } from './3d/index.js';
 import { mountAreasOverlay } from './areas-overlay-2d.js';
 import {
@@ -402,6 +403,7 @@ const measureClearBtn = document.getElementById('measure-clear-btn');
 
 const measureTool = createMeasureTool({ onChange: () => {
   measure2D?.render();
+  renderMeasure3D(measureTool.measurements(), state.units || 'ft');
   if (measureBtn) measureBtn.setAttribute('aria-pressed', measureTool.isArmed() ? 'true' : 'false');
   measureClearBtn?.toggleAttribute('hidden', measureTool.measurements().length === 0);
 } });
@@ -423,6 +425,7 @@ function setMeasureArmed(on) {
     measureTool.disarm();
   }
   measure2D?.setArmed(measureTool.isArmed());
+  setMeasureArmed3D(measureTool.isArmed());
 }
 
 measureBtn?.addEventListener('click', () => setMeasureArmed(!measureTool.isArmed()));
@@ -1008,6 +1011,7 @@ document.addEventListener('keydown', (e) => {
     placement,
     getMedianDepth: () => state.subjectMedianDepth,
   });
+  setMeasureTool3D(measureTool);
 
   // Workspace badge in the header — hide for the default workspace so the
   // chrome stays clean for solo users; show "ws: alice" for namespaced URLs.
@@ -1381,7 +1385,11 @@ document.addEventListener('relight:calibration', async (e) => {
   syncLightsToScene(state.lights, state.selectedId);
   frameStage3D();
 });
-document.addEventListener('relight:units', (e) => { setUnits3D(e.detail); areasOverlay?.render(); cubeOverlay?.render(); });
+document.addEventListener('relight:units', (e) => {
+  setUnits3D(e.detail); areasOverlay?.render(); cubeOverlay?.render();
+  measure2D?.render();
+  renderMeasure3D(measureTool.measurements(), state.units || 'ft');
+});
 
 // ─── 2D "Areas" overlay (Spec 2): acting-area cells projected on the photo ─
 const areasOverlay = mountAreasOverlay({
@@ -1737,3 +1745,4 @@ window.__calDraft = () => state.cal_draft;
 window.__calPreview = () => previewCamera();
 window.__cubeOverlay = cubeOverlay;
 window.__calPanel = calibPanel;
+window.__measureCount = () => measureTool.measurements().length;

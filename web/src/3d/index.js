@@ -14,7 +14,8 @@ import { createTargetViz } from './target-viz.js';
 import { buildStage, removeStage, updateStageUnits } from './stage.js';
 import { removeRigOverlay, updateRigOverlay } from './rig-overlay.js';
 import { removeCubes, styleCubes, updateCubes, STAGE_BOX_NAME } from './cube-3d.js';
-import { worldToEngine, effectiveFit } from '../metric/calibration.js';
+import { worldToEngine, engineToWorld, effectiveFit } from '../metric/calibration.js';
+import { updateMeasureOverlay } from './measure-overlay.js';
 
 let api = null;
 let currentPointCloud = null;
@@ -49,6 +50,22 @@ let cubeOpts = null;
 let boxGizmoHooks = null;
 let boxDragging = false;
 let selectedLightId = null;
+
+// Ruler (Spec 3): the tool instance driving state, and whether it is armed
+// (takes clicks ahead of light selection/orbit in onCanvasClick below).
+let measureTool = null;
+let measureArmed = false;
+
+export function setMeasureTool3D(tool) { measureTool = tool; }
+
+export function setMeasureArmed3D(on) {
+  measureArmed = !!on;
+  if (api?.renderer?.domElement) api.renderer.domElement.style.cursor = measureArmed ? 'crosshair' : '';
+}
+
+export function renderMeasure3D(measurements, units) {
+  updateMeasureOverlay(api?.scene, measurements, units);
+}
 
 export function mount3D({ onSelectLight, onUpdateLight, placement: placementCtl, getMedianDepth: getMedian } = {}) {
   if (api) return api;
@@ -177,6 +194,24 @@ function onPlacementContext(e) {
 
 function onCanvasClick(e) {
   if (e.button !== 0) return;                 // left click only
+  if (measureArmed && measureTool) {
+    // Take the click before orbit/gizmo handling: same early-return pattern
+    // as the placement branch just below, which already wins over orbit the
+    // same way. Reuses placementEngPoint's cloud -> deck -> placement-plane
+    // fallback (already a standalone helper here, no extraction needed) --
+    // it returns an ENGINE point when calibrated (Measure requires a
+    // calibration to even arm), so convert to world feet before addPoint:
+    // the tool has no idea which space it's handed, so a skipped conversion
+    // here would produce plausible-looking but silently wrong numbers.
+    e.preventDefault();
+    e.stopPropagation();
+    const engPt = placementEngPoint(e);
+    if (engPt && metricCal) {
+      const world = engineToWorld(engPt, metricCal.camera, effectiveFit(metricCal));
+      measureTool.addPoint(world);
+    }
+    return;
+  }
   if (placement && placement.isActive()) {
     const engPt = placementEngPoint(e);
     if (engPt) placement.acceptSurfacePoint(engPt);
