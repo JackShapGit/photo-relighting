@@ -1241,7 +1241,13 @@ const measure2D = mountMeasure2D({
 
 function setMeasureArmed(on) {
   if (on) {
-    if (placement?.isActive()) placement.cancel();   // one modal capture at a time
+    // One modal capture at a time, against BOTH other capture layers.
+    // #refine-overlay is pointer-events:auto at z-index 5 — the same value
+    // #measure-capture uses — and sits earlier in DOM order, so on that tie
+    // the measure layer paints on top and silently swallows mask-refinement
+    // clicks, with behaviour that varies by arming order.
+    if (placement?.isActive()) placement.cancel();
+    if (state.refineMode) setRefineMode(false);
     measureTool.arm();
   } else {
     measureTool.disarm();
