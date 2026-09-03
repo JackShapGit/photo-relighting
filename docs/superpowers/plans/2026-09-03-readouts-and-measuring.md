@@ -1588,13 +1588,23 @@ test('measurements clear when the calibration changes or the scene switches', as
   await page.mouse.click(...at(0.70, 0.62));
   await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(1);
 
-  // A re-apply of the calibration drops them.
+  // A re-apply of the calibration drops them (applyCalibration site).
   await page.evaluate(() => window.__applyCalibration());
   await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(0);
   await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(0);
 
   expect(errors).toEqual([]);
 });
+```
+
+**All three clear sites must be covered, not just one.** The test above exercises only `applyCalibration`. Add assertions for the other two, or the guards at `applyScene` and `adoptVenue` could be deleted by a future edit with the suite still green — which is the regression this task exists to prevent:
+
+- **`applyScene` (a scene switch / photo swap):** take a measurement, switch to a different scene, assert the count is 0.
+- **`adoptVenue` (a venue dims edit that re-solves the camera):** take a measurement, change the venue's width/height/depth through the venue editor, assert the count is 0.
+
+Use whatever mechanism the existing smoke specs already use to switch scenes and edit venue dims rather than inventing one; if a path has no existing handle in the suite, say so in the report rather than reaching into `window.__state` to fake it.
+
+```js
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
