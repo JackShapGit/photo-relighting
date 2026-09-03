@@ -78,6 +78,8 @@ test('measurements() returns copies, not the internal records', () => {
   t.addPoint([0, 0, 0]); t.addPoint([10, 0, 0]);
   t.measurements()[0].a[0] = 999;
   assert.equal(t.measurements()[0].a[0], 0);
+  t.measurements()[0].b[0] = 999;
+  assert.equal(t.measurements()[0].b[0], 10);
 });
 
 test('onChange fires on arm, each point, commit, cancel, clear and disarm', () => {

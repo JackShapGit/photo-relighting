@@ -89,3 +89,35 @@ test('readouts: columns populate, and a real-mouse drag moves the throw live', a
 
   expect(errors).toEqual([]);
 });
+
+test('ruler 2D: two clicks draw a labelled measurement and a second one persists', async ({ page }) => {
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-ruler2d');
+
+  await page.locator('#measure-btn').click();
+  await expect(page.locator('#measure-btn')).toHaveAttribute('aria-pressed', 'true');
+
+  const wrap = await page.locator('#canvas-wrap').boundingBox();
+  const at = (fx, fy) => [wrap.x + wrap.width * fx, wrap.y + wrap.height * fy];
+
+  // Pointer calibration probe: coords are ~10% off on this machine.
+  await page.mouse.move(...at(0.5, 0.5));
+
+  await page.mouse.click(...at(0.30, 0.62));
+  await page.mouse.click(...at(0.70, 0.62));
+  await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(1);
+
+  await page.mouse.click(...at(0.35, 0.55));
+  await page.mouse.click(...at(0.65, 0.55));
+  await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(2);
+
+  // Escape exits the tool but keeps what was measured.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#measure-btn')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(2);
+
+  await page.locator('#measure-clear-btn').click();
+  await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});

@@ -29,6 +29,9 @@
     <label class="header-toggle" title="Show the venue's acting areas on the photo (calibrated scenes)">
       <input type="checkbox" id="show-areas" /> Areas
     </label>
+    <button id="measure-btn" type="button" class="measure-toggle" aria-pressed="false"
+            title="Measure between two points in either pane">Measure</button>
+    <button id="measure-clear-btn" type="button" hidden>Clear</button>
     <label class="header-toggle" title="Show the stage box (the calibration cube) on the photo">
       <input type="checkbox" id="show-stage-box" checked /> Stage box
     </label>
@@ -91,9 +94,11 @@
           <canvas id="canvas"></canvas>
           <svg id="areas-overlay" hidden></svg>
           <svg id="cube-overlay" hidden></svg>
+          <svg id="measure-overlay" hidden></svg>
           <div id="handles"></div>
           <div id="refine-overlay" hidden></div>
           <div id="placement-overlay" hidden></div>
+          <div id="measure-capture" hidden></div>
           <div class="polish-shimmer" data-polish-shimmer hidden>
             <span class="polish-shimmer-text" data-polish-shimmer-text>Polishing…</span>
           </div>

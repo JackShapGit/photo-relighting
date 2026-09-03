@@ -54,6 +54,8 @@ import {
 } from './metric/cube-geometry.js';
 import { solveCamera, validateMarks } from './metric/calibration.js';
 import { mountPlacement2D } from './placement-pane-2d.js';
+import { createMeasureTool } from './measure-tool.js';
+import { mountMeasure2D } from './measure-overlay-2d.js';
 
 const state = newState();
 let tree = null;
@@ -395,6 +397,36 @@ placement2D = mountPlacement2D({
   getSampler: () => depthSampler,
 });
 
+const measureBtn = document.getElementById('measure-btn');
+const measureClearBtn = document.getElementById('measure-clear-btn');
+
+const measureTool = createMeasureTool({ onChange: () => {
+  measure2D?.render();
+  if (measureBtn) measureBtn.setAttribute('aria-pressed', measureTool.isArmed() ? 'true' : 'false');
+  measureClearBtn?.toggleAttribute('hidden', measureTool.measurements().length === 0);
+} });
+
+const measure2D = mountMeasure2D({
+  svgEl: document.getElementById('measure-overlay'),
+  captureEl: document.getElementById('measure-capture'),
+  tool: measureTool,
+  getState: () => state,
+  getSampler: () => depthSampler,
+});
+
+function setMeasureArmed(on) {
+  if (on) {
+    if (placement?.isActive()) placement.cancel();   // one modal capture at a time
+    measureTool.arm();
+  } else {
+    measureTool.disarm();
+  }
+  measure2D?.setArmed(measureTool.isArmed());
+}
+
+measureBtn?.addEventListener('click', () => setMeasureArmed(!measureTool.isArmed()));
+measureClearBtn?.addEventListener('click', () => measureTool.clear());
+
 function onRequestAddLight({ parentArr, index }) {
   pendingAddLight = { parentArr, index };
   lastSelectedBeforePicker = state.selectedId;
@@ -440,6 +472,7 @@ function onPickPreset(preset) {
 
   const placeable = L.type === 'directional' || L.type === 'spotlight' || L.type === 'point';
   if (placeable && placement && state.assetUrls) {
+    if (measureTool.isArmed()) setMeasureArmed(false);   // one modal capture at a time
     // Enter click-to-place. Keep the prior selection so dismissing the picker
     // shows something sensible and a cancel-before-first-click returns to it.
     // The first click commits the new light and selects it.
@@ -919,6 +952,12 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     placement.cancel();
   }
+  if (e.key === 'Escape' && measureTool.isArmed()) {
+    e.preventDefault();
+    if (measureTool.phase() === 'awaitingB') measureTool.cancel();
+    else setMeasureArmed(false);
+    return;
+  }
 });
 
 (async () => {
@@ -1298,6 +1337,16 @@ function updateBadge() {
   }
   calibrateBtn.classList.toggle('is-venue-missing', !!(rec && state.venue && state.venueMissing));
   calibrateBtn.title = title;
+
+  // A ruler needs a feet space: disable Measure (and drop it if armed)
+  // wherever the badge would otherwise say "Calibrate".
+  if (measureBtn) {
+    measureBtn.disabled = !state.calibration;
+    measureBtn.title = state.calibration
+      ? 'Measure between two points in either pane'
+      : 'Calibrate the scene to measure';
+    if (!state.calibration && measureTool.isArmed()) setMeasureArmed(false);
+  }
 }
 function applyUnits(u) {
   state.units = u === 'm' ? 'm' : 'ft';
