@@ -738,6 +738,32 @@ Four Minor findings from Task 3's review, folded here because this task rewrites
 
 **M4 — move the readout block next to the rig fieldset.** Task 3 appended it after the entire `container.innerHTML` template, which puts it below Type, Position, Direction, Intensity, Color, Kelvin, Cone, Softness, Falloff, Gobo, Affects and Enabled — the bottom of a long pane, likely below the fold. These numbers describe the fixture's rig geometry, so they belong with the rig fields. Move the `.readout-block` markup into the template immediately after the rig fieldset (`controls.js` around lines 269–276) rather than appending it afterwards, and keep `updateReadoutBlock(container, L, state.venue, state.units || 'ft')` as the call that fills it once the template is in the DOM.
 
+- [ ] **Step 3c: Ruling T4-B — give a hung fixture a default aim**
+
+A product bug this task surfaced, not a test problem. `buildFixtureLight` (`web/src/rig/rig-tab.js`) never sets a direction, so a new rig fixture inherits `newLightNode`'s `fill` preset (`web/src/lights.js:56`, `direction: [0.4, 0.0, -1]` — Y exactly zero). That preset was written for a portrait-relighting fill light, not a theatre instrument on a pipe 52 ft out in the house. Perfectly horizontal means `planeHitY` rejects it, so **every freshly added, unaimed rig fixture reports `no-crossing`, always.**
+
+The spec accepts an em dash for beams that genuinely never cross the focus plane (a flat shin, an uplight). It does not sanction every new fixture being flat by accident, and Task 1's own unaimed golden uses `[0, -1, 0]` — the intent was always that unaimed means "measures to the focus plane."
+
+In `buildFixtureLight`, when `position` is non-null:
+
+```js
+// A fixture hung on a position points at the stage, not along the generic
+// fill default it would otherwise inherit from newLightNode (lights.js:56,
+// direction [0.4, 0, -1] — perfectly horizontal, so it never crosses the
+// focus-height plane and every readout reads no-crossing).
+const from = positionToWorld(position, offsetFt);
+const to = [0, venue?.focus_height_ft ?? 5, (venue?.depth_ft ?? 30) / 2];
+const d = [0, 1, 2].map((i) => to[i] - from[i]);
+const n = Math.hypot(...d) || 1;
+L.direction_ft = d.map((c) => c / n);
+```
+
+Custom fixtures (no `position`) keep the existing default — they hang on nothing, so there is no stage-relative aim to infer. `syncLightFromFeet` preserves a pre-set `direction_ft` (`light-metric.js:42` fills it only when absent), so this survives the rig sync.
+
+A default *aim* is an inference; a default *area* would be a claim, which is why this does not auto-assign an Area and flip that column from "—" to a cell the designer never picked.
+
+Add a unit test: a fixture on the FOH position gets a `direction_ft` with Y < 0 pointing upstage (positive Z). The E2E then asserts the freshly-added **unaimed** fixture shows a number, which is the end-to-end proof of this ruling — do not aim the test fixture first, as that would mask exactly this bug.
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx playwright test --config=web/tests/playwright.config.js web/tests/smoke-measure.spec.js`
