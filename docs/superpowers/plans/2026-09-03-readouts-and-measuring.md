@@ -1606,11 +1606,16 @@ Expected: FAIL — count stays 1
 
 In `web/src/main.js`, call `measureTool.clear()` at the START of every path that re-solves the calibration or swaps the photo. Add the line to each of:
 
-- `applyCalibration` (the function `window.__applyCalibration` exposes)
-- the calibration Revert handler
-- the calibration Undo and Redo handlers
-- `adoptVenue` / `applyVenueEdit` (a venue edit moves the focus height and the house box)
-- the scene-load path (`loadScene` / `prepareScene`, wherever `depthSampler` is rebuilt)
+Do not trust this list — sweep for `state.calibration =` and clear at every assignment. As implemented there are exactly three, and the sweep is the requirement:
+
+- `applyCalibration` — one call here covers Apply, Undo, Redo and Clear-calibration, since all four funnel through it
+- `adoptVenue` — its re-solve branch, which is the only venue path that rebuilds the camera
+- `applyScene` — the scene-load path, which is also the only place `depthSampler` is assigned
+
+**Two paths deliberately NOT cleared**, because clearing them would wipe valid measurements on actions that never move the coordinate system:
+
+- **The calibration Revert handler** only dispatches a local draft action (`dispatch({ type: 'revert' })`) and never reaches `applyCalibration`. It discards an *unapplied* edit, so the solve a measurement was resolved against is unchanged.
+- **`applyVenueEdit`** never assigns `state.calibration`. An earlier draft of this plan justified clearing here on the grounds that a venue edit moves the focus height and the house box — but those feed the *readouts*, which recompute from live state and store nothing. Measurements depend only on the camera solve. House-box edits are draft-only until Apply, which `adoptVenue`/`applyCalibration` already cover.
 
 ```js
   measureTool.clear();   // Spec 3 decision 13: no measurement outlives its solve
