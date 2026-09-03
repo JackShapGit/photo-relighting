@@ -26,13 +26,13 @@ async function calibratedRigScene(page, name) {
 
 /**
  * Add a fixture on the venue's second hang position (index 1 — "1E", an
- * onstage pipe) and aim it through the app's own mechanism (the Area
- * select) so its throw is deterministic: `buildFixtureLight` creates every
- * fixture unaimed (`fixture.area = null`), and an unaimed fixture's throw
- * depends on whatever `direction_ft` it inherited by default — not
- * something a test should rely on. Area 5 is the centre cell of the 3x3
- * grid; setFixtureArea gives the fixture a target_ft of
- * areaCenter(venue, '5'), i.e. [0, focus_height_ft, Z] — deterministic.
+ * onstage pipe) and leave it unaimed: `buildFixtureLight` (ruling T4-B)
+ * gives a hung fixture a default direction_ft pointing at stage centre at
+ * focus height, so its throw reads a number without the designer assigning
+ * an Area first. This is the end-to-end proof that the default-aim fix
+ * works — aiming the fixture here (e.g. via the Area select) would mask a
+ * regression in that default, which is exactly what an earlier version of
+ * this test did before the ruling.
  *
  * Not the first position (FOH, index 0): in this test's calibration FOH's
  * trim/upstage projects outside the photographed frame, so its 2D position
@@ -58,12 +58,11 @@ async function calibratedRigScene(page, name) {
  * an id-based selector keeps following the same light through that rebuild;
  * a position-based one would not.
  */
-async function addAimedFixture(page) {
+async function addHungFixture(page) {
   await page.locator('#rig-root .rig-positions tbody tr').nth(1)
     .locator('.rig-actions .rig-btn').first().click();
   const row = page.locator('#rig-root .rig-fixtures tr.rig-fixture').first();
   await expect(row).toHaveCount(1);
-  await row.locator('select[data-key$=":area"]').selectOption('5');
   await expect(row.locator('[data-readout="throw"]')).not.toHaveText('—');
   const id = await row.getAttribute('data-id');
   expect(id).toBeTruthy();
@@ -73,7 +72,7 @@ async function addAimedFixture(page) {
 test('readouts: columns populate, and a real-mouse drag moves the throw live', async ({ page }) => {
   test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
   const { errors } = await calibratedRigScene(page, 'smoke-measure-readouts');
-  const fixtureId = await addAimedFixture(page);
+  const fixtureId = await addHungFixture(page);
 
   const throwCell = page.locator(`#rig-root tr.rig-fixture[data-id="${fixtureId}"] [data-readout="throw"]`);
   const before = await throwCell.textContent();

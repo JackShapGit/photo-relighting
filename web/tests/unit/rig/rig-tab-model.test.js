@@ -133,6 +133,22 @@ test('buildFixtureLight makes a preset-applied fixture on a position (or Custom)
   assert.notEqual(buildFixtureLight(V, null, 'ers', 0, 1).id, buildFixtureLight(V, null, 'ers', 0, 1).id);
 });
 
+test('buildFixtureLight aims a hung fixture at stage centre; Custom keeps the generic default', () => {
+  // Ruling T4-B: newLightNode's fill default (lights.js) is Y-flat, so an
+  // unaimed hung fixture would never cross the focus plane. A fixture hung
+  // on a position gets a direction_ft pointing at [0, focus_height_ft,
+  // depth_ft/2] instead — down (Y < 0 from a pipe trim) and upstage
+  // (Z > 0, toward the stage) from a house position like FOH.
+  const L = buildFixtureLight(V, pos('FOH'), 'ers', 4, 1);
+  assert.ok(Array.isArray(L.direction_ft));
+  assert.ok(L.direction_ft[1] < 0, 'aims down from a 22 ft trim to a 5 ft focus height');
+  assert.ok(L.direction_ft[2] > 0, 'aims upstage from FOH (upstage_ft -52) toward the stage');
+  assert.ok(Math.abs(Math.hypot(...L.direction_ft) - 1) < 1e-9, 'normalized');
+
+  const C = buildFixtureLight(V, null, 'ers', 0, 1);
+  assert.equal(C.direction_ft, undefined, 'Custom has no position to aim from; keeps the generic default');
+});
+
 test('cloneFixture copies the light with a new id, the next name, and offset + 2', () => {
   const L = buildFixtureLight(V, pos('1E'), 'ers', 4, 1);
   L.gobo = { texture_id: 'breakup' }; L.position_ft = [4, 20, 6];

@@ -150,6 +150,19 @@ export function buildFixtureLight(venue, position, type, offsetFt, index) {
     fixture: { type, position_id: position?.id ?? null, offset_ft: offsetFt, area: null },
   });
   applyFixturePreset(L, type);
+  if (position) {
+    // A fixture hung on a position points at the stage, not along the
+    // generic fill default it would otherwise inherit from newLightNode
+    // (lights.js: direction [0.4, 0, -1] — perfectly horizontal, so it
+    // never crosses the focus-height plane and every readout reads
+    // no-crossing). Custom fixtures keep the default: they hang on
+    // nothing, so there's no stage-relative aim to infer (ruling T4-B).
+    const from = positionToWorld(position, offsetFt);
+    const to = [0, venue?.focus_height_ft ?? 5, (venue?.depth_ft ?? 30) / 2];
+    const d = [0, 1, 2].map((i) => to[i] - from[i]);
+    const n = Math.hypot(...d) || 1;
+    L.direction_ft = d.map((c) => c / n);
+  }
   return L;
 }
 
