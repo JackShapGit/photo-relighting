@@ -235,6 +235,7 @@ main {
 .rig-table input:focus, .rig-table select:focus { border-color: var(--accent, #4a7); outline: none; background: var(--bg); }
 .rig-table input.is-invalid { border-color: var(--danger, #c44); }
 .rig-muted { color: var(--text-muted); }
+.rig-readout { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rig-count { text-align: center; color: var(--text-muted); }
 .rig-actions { display: inline-flex; gap: 2px; }
 .rig-btn {

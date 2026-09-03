@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { distanceFt, planeHitY, insideHouse, throwAndDiameter, reasonTooltip } from '../../../src/metric/measure.js';
+import { distanceFt, planeHitY, insideHouse, throwAndDiameter, reasonTooltip, readoutCellText } from '../../../src/metric/measure.js';
 import { SYNTHETIC_VENUE } from '../../../src/rig/geometry.js';
 import { applyFixturePreset } from '../../../src/rig/presets.js';
 
@@ -123,4 +123,21 @@ test('values are raw feet, never formatted, and ok has no tooltip', () => {
 
 test('distanceFt is a plain 3D euclidean distance', () => {
   near(distanceFt([0, 0, 0], [3, 4, 0]), 5);
+});
+
+// ── readoutCellText ──────────────────────────────────────────────────────
+test('readoutCellText: an aimed fixture formats throw and diameter in the display unit', () => {
+  const L = { type: 'spotlight', position_ft: [0, 25, 0], target_ft: [0, 5, 0], cone_angle: 0.2 };
+  const V = { width_ft: 40, height_ft: 20, depth_ft: 30, focus_height_ft: 5 };
+  assert.equal(readoutCellText(L, V, 'ft', 'throw').text, '20.0');
+  assert.equal(readoutCellText(L, V, 'ft', 'throw').title, '');
+  assert.equal(readoutCellText(L, V, 'm', 'throw').text, '6.1');
+});
+
+test('readoutCellText: a cyc shows an em dash and the reason tooltip', () => {
+  const L = { type: 'linear', position_ft: [0, 5, 0], cone_angle: 0.2 };
+  const V = { width_ft: 40, height_ft: 20, depth_ft: 30, focus_height_ft: 5 };
+  const r = readoutCellText(L, V, 'ft', 'dia');
+  assert.equal(r.text, '—');
+  assert.ok(r.title.length > 0);
 });

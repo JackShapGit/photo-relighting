@@ -3,6 +3,7 @@
 // World frame of Spec 1 (feet; +X audience right, +Y up, +Z upstage; origin
 // at the centre of the lip on the deck, so the house is at negative Z).
 import { defaultHouse } from '../rig/geometry.js';
+import { toDisplay } from './units.js';
 
 const EPS = 1e-9;
 const MIN_CONE = 1e-4;                        // radians: below this there is no pool
@@ -77,4 +78,16 @@ const TOOLTIPS = {
 /** Tooltip for a reason code; '' for 'ok'. */
 export function reasonTooltip(reason) {
   return TOOLTIPS[reason] || '';
+}
+
+/**
+ * Text and tooltip for one readout cell. `kind` is 'throw' or 'dia'.
+ * Pure so the fixtures table, the props pane and node --test can never word
+ * the same fixture state differently.
+ */
+export function readoutCellText(light, venue, units, kind) {
+  const r = throwAndDiameter(light, venue);
+  if (r.reason !== 'ok') return { text: '—', title: reasonTooltip(r.reason) };
+  const v = kind === 'throw' ? r.throwFt : r.fieldDiaFt;
+  return { text: toDisplay(v, units).toFixed(1), title: '' };
 }

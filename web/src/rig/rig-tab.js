@@ -17,6 +17,7 @@ import {
 } from './fixture-sync.js';
 import { syncLightFromFeet } from '../metric/light-metric.js';
 import { toDisplay, parseLength } from '../metric/units.js';
+import { readoutCellText } from '../metric/measure.js';
 import { MAX_EMITTERS } from '../webgl/renderer.js';
 import { defaultHouse } from './geometry.js';
 import {
@@ -500,7 +501,8 @@ export function mountRigTab({ rootEl, getState, onVenueChange, onLightsChange, o
     const table = el('table', 'rig-table rig-fixtures');
     const thead = el('thead');
     const hr = el('tr');
-    for (const h of ['Name', 'Type', 'Option', 'Position', `Offset (${units})`, 'Area', 'On', '']) hr.appendChild(el('th', null, h));
+    for (const h of ['Name', 'Type', 'Option', 'Position', `Offset (${units})`, 'Area',
+                     `Throw (${units})`, `Ø (${units})`, 'On', '']) hr.appendChild(el('th', null, h));
     thead.appendChild(hr);
     table.appendChild(thead);
     const tbody = el('tbody');
@@ -511,7 +513,7 @@ export function mountRigTab({ rootEl, getState, onVenueChange, onLightsChange, o
     for (const group of rowsForVenue(lights, venue)) {
       const gh = el('tr', 'rig-group');
       const th = el('th', null, `${group.name} (${group.fixtures.length})`);
-      th.colSpan = 8;
+      th.colSpan = 10;
       gh.appendChild(th);
       tbody.appendChild(gh);
       for (const L of group.fixtures) {
@@ -571,6 +573,13 @@ export function mountRigTab({ rootEl, getState, onVenueChange, onLightsChange, o
         areaSel.disabled = !aimed;
         if (!aimed) areaSel.title = 'A wash has no acting area';
         tr.appendChild(cell(areaSel));
+        for (const kind of ['throw', 'dia']) {
+          const { text, title } = readoutCellText(L, venue, units, kind);
+          const td = cell(text, 'rig-muted rig-readout');
+          td.dataset.readout = kind;
+          if (title) td.title = title;
+          tr.appendChild(td);
+        }
         const on = el('input');
         on.type = 'checkbox'; on.checked = L.enabled !== false; on.dataset.key = `fix:${L.id}:on`;
         on.title = on.checked ? 'Disable' : 'Enable';

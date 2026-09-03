@@ -12,7 +12,7 @@ import { createDragDivider } from './split-view.js';
 
 export const MIN_PANE_WIDTH = 220;
 export const MAX_PANE_FRACTION = 0.6;          // of the window width
-export const DEFAULT_PANE_WIDTHS = { lights: 260, rig: 580 };   // Rig: both tables fit without a horizontal scroll
+export const DEFAULT_PANE_WIDTHS = { lights: 260, rig: 670 };   // Rig: both tables fit without a horizontal scroll (10-column fixtures table)
 export const PANE_WIDTH_KEY_PREFIX = 'photo-relight:left-pane-width:';
 export const LEFT_TAB_KEY = 'photo-relight:left-tab';
 
