@@ -1384,6 +1384,7 @@ Create `web/src/3d/measure-overlay.js`:
 import * as THREE from 'three';
 import { distanceFt } from '../metric/measure.js';
 import { formatLength } from '../metric/units.js';
+import { worldFtToThree } from './coords.js';
 
 const GROUP_NAME = 'measureOverlay';
 const LABEL_HEIGHT_FT = 1.2;
@@ -1413,12 +1414,17 @@ export function buildMeasureOverlay(measurements, units = 'ft') {
   group.name = GROUP_NAME;
   const mat = new THREE.LineBasicMaterial({ color: COLOR });
   for (const m of measurements) {
+    // Endpoints are world feet; every world-feet point entering THREE space
+    // goes through worldFtToThree first (coords.js:87 — it negates Z). Six
+    // other files in 3d/ do this without exception, rig-overlay.js included.
+    // Skipping it draws the measurement mirrored onto the audience side.
     const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(...m.a), new THREE.Vector3(...m.b),
+      new THREE.Vector3(...worldFtToThree(m.a)), new THREE.Vector3(...worldFtToThree(m.b)),
     ]);
     group.add(new THREE.Line(geom, mat));
     const label = labelSprite(formatLength(distanceFt(m.a, m.b), units));
-    label.position.set((m.a[0] + m.b[0]) / 2, (m.a[1] + m.b[1]) / 2, (m.a[2] + m.b[2]) / 2);
+    const mid = worldFtToThree([(m.a[0] + m.b[0]) / 2, (m.a[1] + m.b[1]) / 2, (m.a[2] + m.b[2]) / 2]);
+    label.position.set(...mid);
     group.add(label);
   }
   return group;
