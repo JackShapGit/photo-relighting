@@ -1446,6 +1446,34 @@ export function updateMeasureOverlay(scene, measurements, units = 'ft') {
 }
 ```
 
+- [ ] **Step 3a2: Extract the segment math so it can be unit-tested (ruling T7-B)**
+
+The world→Three conversion is this task's highest-risk logic, and inlining it inside `THREE.Line`/`Sprite` construction makes it untestable by `node --test`, which cannot import three. The codebase already solves exactly this: `web/src/3d/cube-lines.js` is pure vertex math with **no THREE import** ("so node can test them"), `cube-3d.js` wraps it in `THREE.LineSegments`, and `web/tests/unit/cube-lines.test.js` asserts numeric positions in the Three frame.
+
+Follow that split. Create `web/src/3d/measure-lines.js` — pure, no THREE import:
+
+```js
+/** Pure segment geometry for the 3D ruler (no Three import, so node can test
+ * it): each measurement's two endpoints and midpoint in the Three frame
+ * (x = world X, y = world Y, z = −world Z; see coords.js worldFtToThree).
+ * measure-overlay.js wraps these in THREE.Line and a label sprite. */
+import { worldFtToThree } from './coords.js';
+import { distanceFt } from '../metric/measure.js';
+
+export function measureSegment(m) {
+  return {
+    a: worldFtToThree(m.a),
+    b: worldFtToThree(m.b),
+    mid: worldFtToThree([0, 1, 2].map((i) => (m.a[i] + m.b[i]) / 2)),
+    lengthFt: distanceFt(m.a, m.b),
+  };
+}
+```
+
+`measure-overlay.js` then calls `measureSegment` instead of converting inline. Note `lengthFt` is computed from the **unconverted** world-feet points — Z-negation does not change a Euclidean distance, but deriving it from the converted values would be wrong in spirit and would break if the transform ever gained a scale.
+
+Add `web/tests/unit/3d/measure-lines.test.js` following `cube-lines.test.js`: assert the Z sign flips on both endpoints, the midpoint is the converted midpoint (not the midpoint of converted points — equal here, but assert the contract), and `lengthFt` matches `distanceFt` on the raw input. **This is the regression guard for the whole task:** without it, someone "simplifying" the overlay back to unconverted points would draw every measurement mirrored onto the audience side of the stage and nothing in the suite would fail.
+
 - [ ] **Step 3b: Wire picking in `3d/index.js`**
 
 Add module state and the armed pointer handler, reusing the existing `raycaster` and the same surface order the placement path uses (point cloud, then deck, then placement plane):
