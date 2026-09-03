@@ -40,7 +40,7 @@
 | `web/src/controls.js` | Props-pane readout block; `updateReadoutBlock()`. | Modify (Tasks 3, 4) |
 | `web/src/main.js` | Mount tool, header wiring, Escape, clear-on-change, readout calls in `redraw()`. | Modify (Tasks 4, 6, 7, 8) |
 | `web/playground.html` | Overlay layers, Measure toggle, Clear button. | Modify (Task 6) |
-| `web/styles.css` | Overlay, toggle and readout-cell styling. | Modify (Tasks 2, 6) |
+| `web/playground.css` | Overlay, toggle and readout-cell styling. | Modify (Tasks 2, 6) |
 
 ---
 
@@ -320,8 +320,10 @@ MSG
 **Files:**
 - Modify: `web/src/metric/measure.js` (add `readoutCellText`)
 - Modify: `web/src/rig/rig-tab.js` (`renderFixturesTable`, around lines 499–605)
-- Modify: `web/styles.css`
+- Modify: `web/src/pane-divider.js:15` (default rig pane width — see ruling P4)
+- Modify: `web/playground.css`
 - Test: `web/tests/unit/metric/measure.test.js`
+- Test: `web/tests/unit/pane-divider.test.js` (the 580 assertions)
 
 **Interfaces:**
 - Consumes: `throwAndDiameter`, `reasonTooltip` (Task 1); `toDisplay` from `./units.js`; existing `el`, `cell` helpers in `rig-tab.js`.
@@ -413,11 +415,21 @@ for (const kind of ['throw', 'dia']) {
 }
 ```
 
-Add to `web/styles.css`:
+Add to `web/playground.css` (beside the other `.rig-table` rules):
 
 ```css
 .rig-readout { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 ```
+
+**Ruling P4 — the default rig pane width must grow with the table.** Two new columns add ~83px of content, and `web/tests/smoke-rig.spec.js:92` asserts the fixtures table fits the default pane width without a horizontal scroll. `web/src/pane-divider.js:15` carries that contract in its own comment. Update it:
+
+```js
+export const DEFAULT_PANE_WIDTHS = { lights: 260, rig: 670 };   // Rig: both tables fit without a horizontal scroll (10-column fixtures table)
+```
+
+Then update the five hard-coded `580`s in `web/tests/unit/pane-divider.test.js` (the test name on line 11, the `deepEqual` on line 14, and the `resolveTabWidth` assertions on lines 44–48) to `670`.
+
+Do **not** relax the smoke assertion to allow scrolling — it is the only thing that caught this, and weakening it to accommodate new work is how regressions hide. `DEFAULT_PANE_WIDTHS` is a default and a double-click reset target only: `MIN_PANE_WIDTH` (220) and `MAX_PANE_FRACTION` (0.6) are separate, and a user with a stored rig width keeps it.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -432,7 +444,7 @@ Expected: PASS (this spec asserts rig-table structure, so a colSpan mistake show
 - [ ] **Step 6: Commit**
 
 ```bash
-git add web/src/metric/measure.js web/src/rig/rig-tab.js web/styles.css web/tests/unit/metric/measure.test.js
+git add web/src/metric/measure.js web/src/rig/rig-tab.js web/playground.css web/tests/unit/metric/measure.test.js
 git commit -F - <<'MSG'
 feat(rig): throw and field-diameter columns in the fixtures table
 
@@ -451,7 +463,7 @@ MSG
 
 **Files:**
 - Modify: `web/src/controls.js` (`renderLightProps`, after the rig fieldset that ends around line 311)
-- Modify: `web/styles.css`
+- Modify: `web/playground.css`
 - Test: `web/tests/unit/metric/measure.test.js` (extend)
 
 **Interfaces:**
@@ -536,7 +548,7 @@ export function updateReadoutBlock(container, light, venue, units = 'ft') {
 }
 ```
 
-Add to `web/styles.css`:
+Add to `web/playground.css`:
 
 ```css
 .readout-block { margin: 8px 0; padding: 6px 8px; border-radius: 4px; background: var(--panel-2, rgba(127,127,127,.08)); }
@@ -553,7 +565,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add web/src/controls.js web/styles.css web/tests/unit/readout-block.test.js
+git add web/src/controls.js web/playground.css web/tests/unit/readout-block.test.js
 git commit -F - <<'MSG'
 feat(props): throw and field-diameter block for the selected fixture
 
@@ -969,7 +981,7 @@ MSG
 - Create: `web/src/measure-overlay-2d.js`
 - Modify: `web/playground.html`
 - Modify: `web/src/main.js`
-- Modify: `web/styles.css`
+- Modify: `web/playground.css`
 - Test: `web/tests/smoke-measure.spec.js` (extend)
 
 **Interfaces:**
@@ -1233,7 +1245,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add web/src/measure-overlay-2d.js web/src/main.js web/playground.html web/styles.css web/tests/smoke-measure.spec.js
+git add web/src/measure-overlay-2d.js web/src/main.js web/playground.html web/playground.css web/tests/smoke-measure.spec.js
 git commit -F - <<'MSG'
 feat(measure): photo-pane ruler with a modal capture layer
 
