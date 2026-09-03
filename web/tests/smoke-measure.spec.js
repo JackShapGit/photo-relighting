@@ -246,3 +246,23 @@ test('ruler 3D: two clicks in the viewport draw a measurement', async ({ page })
   await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(1);
   expect(errors).toEqual([]);
 });
+
+test('measurements clear when the calibration changes or the scene switches', async ({ page }) => {
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-clear');
+
+  await page.locator('#measure-btn').click();
+  const wrap = await page.locator('#canvas-wrap').boundingBox();
+  const at = (fx, fy) => [wrap.x + wrap.width * fx, wrap.y + wrap.height * fy];
+  await page.mouse.move(...at(0.5, 0.5));
+  await page.mouse.click(...at(0.30, 0.62));
+  await page.mouse.click(...at(0.70, 0.62));
+  await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(1);
+
+  // A re-apply of the calibration drops them.
+  await page.evaluate(() => window.__applyCalibration());
+  await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(0);
+  await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});

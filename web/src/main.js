@@ -528,6 +528,7 @@ function onCanvasSelect(lightId) {
 async function applyScene(scene) {
   await flushSave();    // commit any pending auto-save against the previous scene
   if (placement?.isActive()) placement.cancel();
+  measureTool.clear();   // Spec 3 decision 13: a new photo/session invalidates any measurement
 
   // Reset transient refine UI from any previous scene.
   if (state.refineMode) setRefineMode(false);
@@ -807,6 +808,7 @@ function adoptVenue(v, { missing = false } = {}) {
   state.venue_snapshot = v;
   state.venueMissing = missing;
   if (state.calibration) {
+    measureTool.clear();   // Spec 3 decision 13: the re-solve below moves the camera
     const base = lastAppliedRecord || stripCamera(state.calibration);
     state.calibration = solveRecord(mergeVenueIntoCalibration(base, v), state.height / state.width);
     migrateLightsToFeet(state.lights, state.calibration);
@@ -1272,6 +1274,7 @@ window.__state = state;  // for console debugging
 // this image, give every light feet coordinates, notify listeners, redraw+save.
 let lastAppliedRecord = null;   // the panel's record object behind state.calibration
 function applyCalibration(record) {
+  measureTool.clear();   // Spec 3 decision 13: no measurement outlives its solve
   lastAppliedRecord = record || null;
   state.calibration = record ? solveRecord(record, state.height / state.width) : null;
   if (state.calibration) migrateLightsToFeet(state.lights, state.calibration);
