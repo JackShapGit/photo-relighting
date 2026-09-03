@@ -6,9 +6,10 @@ import {
   setFixtureType, setFixtureOption, setFixturePosition, setFixtureArea, setFixtureOffset,
   CUSTOM_ROW_ID, heightRefHint,
 } from '../../../src/rig/rig-tab.js';
-import { SYNTHETIC_VENUE } from '../../../src/rig/geometry.js';
+import { SYNTHETIC_VENUE, positionToWorld } from '../../../src/rig/geometry.js';
 import { solveRecord } from '../../../src/metric/light-metric.js';
 import { SYNTHETIC_STAGE } from '../../../src/metric/calibration.js';
+import { throwAndDiameter } from '../../../src/metric/measure.js';
 
 const V = SYNTHETIC_VENUE;
 const record = solveRecord({ ...SYNTHETIC_STAGE.record, depth_fit: { a: -0.037037, b: 0.024074 } }, SYNTHETIC_STAGE.aspect);
@@ -153,6 +154,28 @@ test('buildFixtureLight aims a hung fixture at stage centre; Custom keeps the ge
 
   const C = buildFixtureLight(V, null, 'ers', 0, 1);
   assert.equal(C.direction_ft, undefined, 'Custom has no position to aim from; keeps the generic default');
+});
+
+test('buildFixtureLight: a boom fixture hung level with focus_height_ft has a flat default aim and reads no-crossing', () => {
+  // Final-fixes wave (review finding): for a boom, positionToWorld returns
+  // [offset_ft, offsetFt, upstage_ft] -- the *second* component, offsetFt,
+  // is the height. When a boom fixture's height equals V.focus_height_ft
+  // (5 here), "to" and "from" share a y of exactly 5, so d[1] is exactly 0:
+  // a perfectly level beam that can never cross the focus plane. Reachable
+  // with any even focus_height_ft given the 2 ft boom step (already latent
+  // in smoke-rig.spec.js's boom-at-offset-5 fixture). No aim formula fixes
+  // this -- a fixture sitting on the focus plane can't cross it at t > 0,
+  // since planeHitY's t = (y - origin[1]) / dir[1] is 0 for any direction
+  // when origin[1] === y. This test pins the edge case rather than leaving
+  // it to be rediscovered; see the spec's Deviations "Known edge case" note
+  // for the two design options to actually resolve it (deferred).
+  const L = buildFixtureLight(V, pos('BSR'), 'ers', 5, 1);
+  const [x, y, z] = L.direction_ft;
+  assert.equal(y, 0, `direction_ft should be exactly level; got y=${y}`);
+
+  L.position_ft = positionToWorld(pos('BSR'), 5);
+  const r = throwAndDiameter(L, V);
+  assert.equal(r.reason, 'no-crossing');
 });
 
 test('cloneFixture copies the light with a new id, the next name, and offset + 2', () => {

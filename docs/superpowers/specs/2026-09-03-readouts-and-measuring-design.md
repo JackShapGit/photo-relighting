@@ -371,10 +371,30 @@ behaviour a user could not predict.
 - **`#measure-overlay`/`#measure-capture` z-index** (`z-index: 1` / `z-index: 5`, matching the `#placement-overlay` precedent) and **Measure/Refine Mask mutual exclusivity** — the two full-bleed pointer-capturing modes are guarded so entering one disarms the other, avoiding mutual recursion by construction (Task 6, fix round in Task 6).
 - **Calibration panel dimension and house field labels gained a `(${units})` suffix** (Task 9). The Width/Height/Depth and house fields already converted their numeric values correctly on unit toggle, but the labels never stated which unit — the same defect class as the props-pane readout gap (M5) below, found independently on this second surface during the Task 9 audit. Because the panel's markup is built once at mount and never rebuilt (unlike `venue-editor.js`, which rebuilds on every open), the fix is a live DOM update inside `setUnits`, not static interpolation.
 
+### Known edge case: a boom fixture level with `focus_height_ft` reads "—" permanently
+
+Final whole-branch review, escalated rather than fixed in the fix wave (the reviewer's suggested fix does not work, verified before ruling it out — see below).
+
+For a boom, `positionToWorld` returns `[p.offset_ft, offsetFt, p.upstage_ft]` — the *second* component, `offsetFt`, is the fixture's height. When a boom fixture's height equals `venue.focus_height_ft` (the default aim's target height, `buildFixtureLight`), the default aim's `d[1]` (the vertical component of the direction toward stage centre) is exactly `0`: a perfectly level beam. `planeHitY` then computes `t = (y - origin[1]) / dir[1]`, and with `origin[1] === y` that is `t = 0` for *any* direction — the beam can never cross the focus plane at `t > 0`, so the readout reads `reason: 'no-crossing'` ("—") from the moment the fixture is created, with no drag or edit needed to reach it. Reachable with any even `focus_height_ft` given the 2 ft boom step; already latent in `smoke-rig.spec.js:115`, which builds a boom at offset 5 against `SYNTHETIC_VENUE`'s `focus_height_ft: 5`. Pinned by a unit test in `rig-tab-model.test.js` ("a boom fixture hung level with focus_height_ft has a flat default aim and reads no-crossing").
+
+**Why "aim at the deck instead" does not fix it:** a fixture sitting *on* the focus plane can never cross it at `t > 0` regardless of which direction it's aimed — the degeneracy is in `origin[1] === y`, not in the direction chosen. No default-aim formula resolves this.
+
+This is spec decision 2's accepted flat-shin case (a beam that never crosses the focus plane reads "—" with a reason tooltip), arising here from the *default* aim rather than a user choice to point a fixture along the deck. Resolving it properly needs a design call between two options, both deferred to the user:
+1. Give default-aimed fixtures a real `target_ft`, which makes them "targeted" — with visible UI consequences (targeted fixtures render and edit differently from aimed-but-untargeted ones elsewhere in the rig tab).
+2. Change how the readout resolves an on-plane fixture, e.g. treating an exactly-level beam at the focus height as a zero-throw special case rather than "no-crossing".
+
 ### Copy and wording
 
 - The `no-beam` tooltip was generalised from the spec's cyc-specific example ("A cyc has no beam angle") to **"No usable beam angle for this fixture"**, because the code path also covers reflectors and out-of-range hand-edited cone angles, not only cycs (Task 1).
 - Props-pane readout block labels gained a `(${units})` suffix (`Throw (${units})` / `Field Ø (${units})`) to match the fixtures table's column headers, which already stated the unit — this was the known gap M5, closed in Task 9.
+
+### API shapes that differ from the spec's interfaces section
+
+The spec's interfaces section describes `mountMeasure3D({ scene, tool, getHit, getUnits })` returning `{ render(), setArmed(bool) }`, matching the 2D adapter's shape. What shipped for the 3D side instead is three module-level functions in `3d/index.js` — `setMeasureTool3D(tool)`, `setMeasureArmed3D(on)`, `renderMeasure3D(measurements, units)` — plus the separate pure `buildMeasureOverlay`/`updateMeasureOverlay` pair in `3d/measure-overlay.js`. This matches the module-singleton pattern the rest of `3d/index.js` already uses for its other overlays, rather than introducing a second, differently-shaped mounting convention alongside it.
+
+Separately, `mountMeasure2D`'s actual signature is `{ svgEl, captureEl, tool, getState, getSampler }` — the spec's `getCalibration`/`getUnits` pair collapsed into a single `getState` accessor. This matches the shape `areas-overlay-2d.js` already uses for the same purpose.
+
+Both shapes were a deliberate fit to this codebase's existing conventions rather than an oversight, and the final review judged both an improvement over the spec's literal interfaces — recorded here because the Deviations section is meant to capture everything that changed from the spec, not only the changes judged worth reconsidering.
 
 ### Deferred, with reasons
 

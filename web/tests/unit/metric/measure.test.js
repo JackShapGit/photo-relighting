@@ -45,6 +45,11 @@ test('throwAndDiameter: an aimed fixture reports the distance to its target', ()
 });
 
 // ── Photometric goldens: the only external check on the geometry ─────────
+// Computed fieldDiaFt is ~13.852 against the ETC-published 13.9, i.e. 0.048
+// ft into the 0.05 tolerance -- a margin of only 0.002 ft. Keep the
+// tolerance this tight; it's what makes the assertion discriminating. Noted
+// here so a future preset tweak that trips this reads as a real preset
+// change, not a flaky/too-tight-tolerance problem (final-fixes wave).
 test('golden: a Source Four 26 deg at a 30 ft throw gives ETC published 13.9 ft field', () => {
   const L = applyFixturePreset({ type: 'spotlight', direction: [0, -1, 0], position: [0, 0, 0] }, 'ers', 26);
   L.position_ft = [0, 30, 0];

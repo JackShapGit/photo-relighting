@@ -150,13 +150,18 @@ export function buildFixtureLight(venue, position, type, offsetFt, index) {
     fixture: { type, position_id: position?.id ?? null, offset_ft: offsetFt, area: null },
   });
   applyFixturePreset(L, type);
-  if (position) {
+  const preset = PRESETS[type] || PRESETS.other;
+  if (position && preset.aimed !== 'none') {
     // A fixture hung on a position points at the stage, not along the
     // generic fill default it would otherwise inherit from newLightNode
     // (lights.js: direction [0.4, 0, -1] — perfectly horizontal, so it
     // never crosses the focus-height plane and every readout reads
     // no-crossing). Custom fixtures keep the default: they hang on
     // nothing, so there's no stage-relative aim to infer (ruling T4-B).
+    // Unaimed types (aimed:'none', i.e. cyc/linear) skip this too:
+    // syncLightFromFeet immediately overwrites direction_ft with [0,-1,0]
+    // for them, so computing an aim here would be silently thrown away —
+    // harmless before, but misleading to read.
     const from = positionToWorld(position, offsetFt);
     const to = [0, venue?.focus_height_ft ?? 5, (venue?.depth_ft ?? 30) / 2];
     const d = [0, 1, 2].map((i) => to[i] - from[i]);

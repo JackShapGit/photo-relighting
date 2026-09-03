@@ -244,6 +244,11 @@ test('ruler 3D: two clicks in the viewport draw a measurement', async ({ page })
   await page.mouse.click(...at(0.65, 0.60));
 
   await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(1);
+  // Final-fixes wave: the count alone can't tell "group added but empty"
+  // from "group has the line + label it should" -- check the actual scene.
+  const overlayChildCount = await page.evaluate(() =>
+    window.__scene3d?.getObjectByName('measureOverlay')?.children.length ?? -1);
+  expect(overlayChildCount).toBe(2);   // one THREE.Line + one label Sprite
   expect(errors).toEqual([]);
 });
 

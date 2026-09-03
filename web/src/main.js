@@ -288,7 +288,7 @@ const redraw = () => {
   // frame — hooked earlier (or in the handle callback) they'd lag by one move.
   rigTab?.updateReadouts();
   const sel = state.lights?.find((L) => L.id === state.selectedId);
-  if (sel) updateReadoutBlock(document.getElementById('props-content'), sel, state.venue, state.units || 'ft');
+  if (sel) updateReadoutBlock(propsContainer(), sel, state.venue, state.units || 'ft');
 };
 const redrawAndSave = () => {
   syncDraggedLights();                 // engine-space edits re-derive feet fields first
@@ -415,6 +415,11 @@ const measure2D = mountMeasure2D({
   getState: () => state,
   getSampler: () => depthSampler,
 });
+// Final-fixes wave: matches the areasOverlay/cubeOverlay resize listeners
+// below — without this the ruler's positions only survived a resize by
+// luck (uniform viewBox scaling), and stroke/label weight would drift
+// until the next onChange.
+window.addEventListener('resize', () => measure2D?.render());
 
 function setMeasureArmed(on) {
   if (on) {
@@ -957,6 +962,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && placement?.isActive()) {
     e.preventDefault();
     placement.cancel();
+    return;
   }
   if (e.key === 'Escape' && measureTool.isArmed()) {
     e.preventDefault();
