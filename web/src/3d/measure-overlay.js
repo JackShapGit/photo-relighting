@@ -3,9 +3,8 @@
 // its depthTest: false labels — consistent with the area labels already
 // shipped, which show through the subject.
 import * as THREE from 'three';
-import { distanceFt } from '../metric/measure.js';
 import { formatLength } from '../metric/units.js';
-import { worldFtToThree } from './coords.js';
+import { measureSegment } from './measure-lines.js';
 
 const GROUP_NAME = 'measureOverlay';
 const LABEL_HEIGHT_FT = 1.2;
@@ -35,18 +34,16 @@ export function buildMeasureOverlay(measurements, units = 'ft') {
   group.name = GROUP_NAME;
   const mat = new THREE.LineBasicMaterial({ color: COLOR });
   for (const m of measurements) {
-    // Geometry arrives in world feet; every other 3D overlay in this module
-    // (rig-overlay.js, cube-lines.js, light-primitives.js, ...) converts
-    // through worldFtToThree (Z is negated) before it reaches a THREE
-    // object, so this does too -- omitting it would draw the ruler mirrored
-    // in Z relative to the stage, the point cloud and every light.
-    const ta = worldFtToThree(m.a), tb = worldFtToThree(m.b);
+    // measure-lines.js does the world-feet -> Three conversion (and is unit
+    // tested for it -- see ruling T7-B); this module only wraps the result
+    // in Three objects.
+    const { a, b, mid, lengthFt } = measureSegment(m);
     const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(...ta), new THREE.Vector3(...tb),
+      new THREE.Vector3(...a), new THREE.Vector3(...b),
     ]);
     group.add(new THREE.Line(geom, mat));
-    const label = labelSprite(formatLength(distanceFt(m.a, m.b), units));
-    label.position.set((ta[0] + tb[0]) / 2, (ta[1] + tb[1]) / 2, (ta[2] + tb[2]) / 2);
+    const label = labelSprite(formatLength(lengthFt, units));
+    label.position.set(...mid);
     group.add(label);
   }
   return group;
