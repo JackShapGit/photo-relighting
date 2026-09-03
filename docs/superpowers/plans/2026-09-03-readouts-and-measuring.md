@@ -318,21 +318,24 @@ MSG
 ### Task 2: Readout columns in the fixtures table
 
 **Files:**
+- Modify: `web/src/metric/measure.js` (add `readoutCellText`)
 - Modify: `web/src/rig/rig-tab.js` (`renderFixturesTable`, around lines 499–605)
 - Modify: `web/styles.css`
-- Test: `web/tests/unit/rig/rig-tab-model.test.js`
+- Test: `web/tests/unit/metric/measure.test.js`
 
 **Interfaces:**
-- Consumes: `throwAndDiameter`, `reasonTooltip` from `../metric/measure.js`; existing `fmt(ft, units)`, `el`, `cell` helpers in `rig-tab.js`.
-- Produces: two `<td>` per fixture row carrying `data-readout="throw"` and `data-readout="dia"`. Task 4 updates these in place; Task 10's E2E selects on them.
+- Consumes: `throwAndDiameter`, `reasonTooltip` (Task 1); `toDisplay` from `./units.js`; existing `el`, `cell` helpers in `rig-tab.js`.
+- Produces:
+  - `readoutCellText(light, venue, units, kind) → { text, title }` exported from **`web/src/metric/measure.js`** — `kind` is `'throw'` or `'dia'`.
+  - two `<td>` per fixture row carrying `data-readout="throw"` and `data-readout="dia"`. Task 4 updates these in place; Tasks 4 and 9 select on them.
+
+**Placement note (controller ruling P1):** `readoutCellText` lives in `metric/measure.js`, NOT in `rig-tab.js`. Task 3 needs it from `controls.js`, and reaching into the rig tab module for one pure text helper would drag the whole rig tab into the props pane's dependency graph. `measure.js` is pure, is the readout module, and is already imported by both consumers.
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `web/tests/unit/rig/rig-tab-model.test.js`:
+Append to `web/tests/unit/metric/measure.test.js` (add `readoutCellText` to that file's existing import from `../../../src/metric/measure.js`):
 
 ```js
-import { readoutCellText } from '../../../src/rig/rig-tab.js';
-
 test('readoutCellText: an aimed fixture formats throw and diameter in the display unit', () => {
   const L = { type: 'spotlight', position_ft: [0, 25, 0], target_ft: [0, 5, 0], cone_angle: 0.2 };
   const V = { width_ft: 40, height_ft: 20, depth_ft: 30, focus_height_ft: 5 };
@@ -352,30 +355,37 @@ test('readoutCellText: a cyc shows an em dash and the reason tooltip', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test web/tests/unit/rig/rig-tab-model.test.js`
+Run: `node --test web/tests/unit/metric/measure.test.js`
 Expected: FAIL — `readoutCellText` is not exported
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `web/src/rig/rig-tab.js`, add the import beside the existing `../metric/units.js` import:
+In `web/src/metric/measure.js`, add the units import at the top:
 
 ```js
-import { throwAndDiameter, reasonTooltip } from '../metric/measure.js';
+import { toDisplay } from './units.js';
 ```
 
-Add the pure cell helper next to `fmt` (near line 241) and export it:
+and the pure cell helper at the end of the module:
 
 ```js
 /**
  * Text and tooltip for one readout cell. `kind` is 'throw' or 'dia'.
- * Pure so the table, the props pane and node --test agree on the wording.
+ * Pure so the fixtures table, the props pane and node --test can never word
+ * the same fixture state differently.
  */
 export function readoutCellText(light, venue, units, kind) {
   const r = throwAndDiameter(light, venue);
   if (r.reason !== 'ok') return { text: '—', title: reasonTooltip(r.reason) };
   const v = kind === 'throw' ? r.throwFt : r.fieldDiaFt;
-  return { text: fmt(v, units), title: '' };
+  return { text: toDisplay(v, units).toFixed(1), title: '' };
 }
+```
+
+In `web/src/rig/rig-tab.js`, add the import beside the existing `../metric/units.js` import:
+
+```js
+import { readoutCellText } from '../metric/measure.js';
 ```
 
 In `renderFixturesTable`, extend the header row (currently line ~503) from 8 to 10 columns:
@@ -411,7 +421,7 @@ Add to `web/styles.css`:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test web/tests/unit/rig/rig-tab-model.test.js`
+Run: `node --test web/tests/unit/metric/measure.test.js`
 Expected: PASS
 
 - [ ] **Step 5: Verify the table still renders end to end**
@@ -422,7 +432,7 @@ Expected: PASS (this spec asserts rig-table structure, so a colSpan mistake show
 - [ ] **Step 6: Commit**
 
 ```bash
-git add web/src/rig/rig-tab.js web/styles.css web/tests/unit/rig/rig-tab-model.test.js
+git add web/src/metric/measure.js web/src/rig/rig-tab.js web/styles.css web/tests/unit/metric/measure.test.js
 git commit -F - <<'MSG'
 feat(rig): throw and field-diameter columns in the fixtures table
 
@@ -445,7 +455,7 @@ MSG
 - Test: `web/tests/unit/metric/measure.test.js` (extend)
 
 **Interfaces:**
-- Consumes: `readoutCellText` from `./rig/rig-tab.js` (exported in Task 2).
+- Consumes: `readoutCellText` from `./metric/measure.js` (added in Task 2, per controller ruling P1).
 - Produces: `updateReadoutBlock(container, light, venue, units) → void`, exported from `controls.js`; markup `div.readout-block` containing `[data-readout="throw"]` and `[data-readout="dia"]`.
 
 - [ ] **Step 1: Write the failing test**
@@ -455,7 +465,7 @@ Create `web/tests/unit/readout-block.test.js`:
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readoutCellText } from '../../src/rig/rig-tab.js';
+import { readoutCellText } from '../../src/metric/measure.js';
 
 // The block's DOM write is exercised in Playwright (Task 10); here we lock
 // the contract that the props pane and the table share one text source.
@@ -485,7 +495,7 @@ Expected: FAIL if Task 2 is incomplete (`readoutCellText` not exported); PASS on
 In `web/src/controls.js`, add near the existing imports:
 
 ```js
-import { readoutCellText } from './rig/rig-tab.js';
+import { readoutCellText } from './metric/measure.js';
 ```
 
 Inside `renderLightProps`, immediately after the rig fieldset is appended to the container, add the block markup (feet-space fixtures only — the block is hidden when there is no calibration, per the spec's `not-calibrated` row):
@@ -573,21 +583,55 @@ MSG
 
 - [ ] **Step 1: Write the failing test**
 
-Create `web/tests/smoke-measure.spec.js`. Copy the scene/calibration setup from `web/tests/smoke-rig.spec.js` verbatim (same `CALIBRATION` constant, same `createSceneFromFixture` + `window.__applyCalibration()` sequence, same `test.setTimeout(180_000)` and viewport). Then:
+Create `web/tests/smoke-measure.spec.js` with ONE shared setup helper. **Controller ruling P3:** the plan originally said to copy the setup into each test; that would be five verbatim copies of a logic block, which the review rubric treats as a defect. Every later test in this file calls the helper — none re-copies the setup.
+
+**Controller ruling P2:** the selectors below are verified against `smoke-rig.spec.js:69–77` and `handles.js:88`. The 2D light handle class is `handle`, not `light-handle`; there is no `.rig-position` or `.rig-add` in the source.
 
 ```js
+import { test, expect } from '@playwright/test';
+import fs from 'node:fs';
+import { createSceneFromFixture, PORTRAIT_A } from './helpers.js';
+
+test.setTimeout(180_000);
+
+const CALIBRATION = {
+  version: 1, units: 'ft', width_ft: 40, height_ft: 20, depth_ft: 30,
+  marks: { lipL: [0.1, 0.61333], lipR: [0.9, 0.61333], top: [0.5, 0.08], backL: [0.23333, 0.54222], backR: [0.76667, 0.54222] },
+  depth_fit: { a: -0.037037, b: 0.024074 }, depth_check: null,
+};
+
+/** A calibrated scene in split view with a venue, Rig tab open. Returns the console-error sink. */
+async function calibratedRigScene(page, name) {
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await createSceneFromFixture(page, { name, viewMode: 'split' });
+  await page.evaluate((cal) => { window.__state.calibration = cal; window.__applyCalibration(); }, CALIBRATION);
+  await expect(page.locator('#calibrate-btn')).toHaveText(/40 × 20 × 30 ft/);
+  await page.locator('#tree-pane .pane-tabs button[data-tab="rig"]').click();
+  await expect(page.locator('#rig-root .rig-positions tbody tr')).toHaveCount(6);
+  return { errors };
+}
+
+/** Add a fixture on the first hang position (FOH). Same click path as smoke-rig.spec.js:75. */
+async function addFixtureOnFOH(page) {
+  await page.locator('#rig-root .rig-positions tbody tr').first()
+    .locator('.rig-actions .rig-btn').first().click();
+  await expect(page.locator('#rig-root .rig-fixtures tr.rig-fixture')).toHaveCount(1);
+}
+
 test('readouts: columns populate, and a real-mouse drag moves the throw live', async ({ page }) => {
-  // ... scene + calibration setup copied from smoke-rig.spec.js ...
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-readouts');
+  await addFixtureOnFOH(page);
 
-  // A fixture on FOH, aimed at an area so it has a target.
-  await page.locator('.rig-position[data-id="p_foh"] .rig-add').click();
-
-  const throwCell = page.locator('tr.rig-fixture [data-readout="throw"]').first();
+  const throwCell = page.locator('#rig-root tr.rig-fixture [data-readout="throw"]').first();
   await expect(throwCell).not.toHaveText('—');
   const before = await throwCell.textContent();
 
   // Calibrate the pointer: screenshot coords are ~10% off on this machine.
-  const handle = page.locator('#handles .light-handle').first();
+  const handle = page.locator('#handles .handle').first();
   const box = await handle.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
@@ -938,7 +982,8 @@ Extend `web/tests/smoke-measure.spec.js` with (setup copied as in Task 4):
 
 ```js
 test('ruler 2D: two clicks draw a labelled measurement and a second one persists', async ({ page }) => {
-  // ... scene + calibration setup ...
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-ruler2d');
 
   await page.locator('#measure-btn').click();
   await expect(page.locator('#measure-btn')).toHaveAttribute('aria-pressed', 'true');
@@ -1222,7 +1267,8 @@ Extend `web/tests/smoke-measure.spec.js`:
 
 ```js
 test('ruler 3D: two clicks in the viewport draw a measurement', async ({ page }) => {
-  // ... scene + calibration setup, viewMode 'split' ...
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-ruler3d');
 
   await page.locator('#measure-btn').click();
   const box = await page.locator('#canvas3d').boundingBox();
@@ -1412,7 +1458,8 @@ Extend `web/tests/smoke-measure.spec.js`:
 
 ```js
 test('measurements clear when the calibration changes or the scene switches', async ({ page }) => {
-  // ... scene + calibration setup ...
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-clear');
 
   await page.locator('#measure-btn').click();
   const wrap = await page.locator('#canvas-wrap').boundingBox();
@@ -1502,8 +1549,9 @@ Extend `web/tests/smoke-measure.spec.js`:
 
 ```js
 test('units: switching to metres converts the readout columns and the ruler label', async ({ page }) => {
-  // ... scene + calibration setup ...
-  await page.locator('.rig-position[data-id="p_foh"] .rig-add').click();
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-units');
+  await addFixtureOnFOH(page);
 
   await page.locator('#measure-btn').click();
   const wrap = await page.locator('#canvas-wrap').boundingBox();
@@ -1512,7 +1560,7 @@ test('units: switching to metres converts the readout columns and the ruler labe
   await page.mouse.click(...at(0.30, 0.62));
   await page.mouse.click(...at(0.70, 0.62));
 
-  const throwCell = page.locator('tr.rig-fixture [data-readout="throw"]').first();
+  const throwCell = page.locator('#rig-root tr.rig-fixture [data-readout="throw"]').first();
   const ftThrow = parseFloat(await throwCell.textContent());
   const ftLabel = await page.locator('#measure-overlay .measure-label').first().textContent();
   expect(ftLabel).toContain('ft');
