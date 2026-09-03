@@ -1716,6 +1716,23 @@ test('units: switching to metres converts the readout columns and the ruler labe
 Run: `npx playwright test --config=web/tests/playwright.config.js web/tests/smoke-measure.spec.js -g "units:"`
 Expected: FAIL if any of the new surfaces ignore the toggle; PASS once they honour it
 
+- [ ] **Step 2b: Fix the header layout collapse (ruling T9-A)**
+
+The `units:` test cannot pass until this is fixed: clicking `#unit-toggle [data-unit="m"]` lands on `#calibrate-btn` instead, because the toggle has collapsed to ~2px wide.
+
+`header` is a flex container. `.view-mode` (playground.css) sets `overflow: hidden` with no `flex-shrink: 0`, and per the flexbox spec a non-visible overflow drops an item's automatic minimum size from content-based to **zero** — so it is the item that collapses when the header overflows. `.calib-badge` has `white-space: nowrap` and no `overflow`, keeping a content-based minimum, so it refuses to yield. Both `#view-mode` (2D | Split | 3D) and `#unit-toggle` carry the `.view-mode` class, so **both segmented controls become unclickable**, not just the unit toggle.
+
+This is latent in the pre-existing CSS but this branch triggered it: Task 6 added the Measure and Clear buttons, and in rig mode the calibrate badge is long (`<venue> · 40 × 20 × 30 ft`). No test before this one had ever clicked either segmented control in a calibrated rig-mode scene.
+
+```css
+.view-mode { /* existing rules */ flex-shrink: 0; }
+.calib-badge { /* existing rules */ min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+```
+
+The reasoning behind that split, since it is a design call: a segmented control that collapses is an **unclickable** control, which is a correctness failure rather than a cosmetic one, so those never shrink. The calibrate badge is the only header element carrying unbounded user-supplied content (the scene or venue name), so it is the right thing to absorb the squeeze — and with `text-overflow: ellipsis` it degrades legibly instead of vanishing.
+
+The `units:` test clicking the toggle is itself the regression guard; no separate assertion is needed.
+
 - [ ] **Step 3: Audit and fix**
 
 Walk the eight surfaces above with the app open in both units. For each, confirm the number changes and the suffix or column header changes with it. Any surface formatting a length without `toDisplay` / `formatLength` gets converted. Grep to shortlist candidates:
