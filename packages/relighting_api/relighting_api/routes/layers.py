@@ -34,6 +34,7 @@ async def render_layers(req: RenderLayersRequest, request: Request) -> Response:
         engine = get_engine()
 
     out_res = tuple(req.output_resolution) if req.output_resolution else None
+    calibration = req.calibration.to_engine(prepared.height / prepared.width) if req.calibration else None
     async with sessions.lock(req.session_id):
         try:
             layers = engine.render_layers(
@@ -42,6 +43,7 @@ async def render_layers(req: RenderLayersRequest, request: Request) -> Response:
                 ambient_background=req.ambient_background,
                 output_resolution=out_res,
                 shadow_style=req.shadow_style,
+                calibration=calibration,
             )
         except torch.cuda.OutOfMemoryError as e:
             raise HTTPException(status_code=503, detail="GPU OOM",

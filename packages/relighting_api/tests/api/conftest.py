@@ -29,21 +29,25 @@ class FakeEngine:
         self, prepared, lights, ambient=0.2, output_resolution=None,
         shadow_style="off",
         ambient_subject=None, ambient_background=None,
+        calibration=None,
     ) -> np.ndarray:
         self.last_lights = list(lights)
         self.last_ambient = ambient
         self.last_ambient_subject = ambient_subject
         self.last_ambient_background = ambient_background
         self.last_shadow_style = shadow_style
+        self.last_calibration = calibration
         return np.full((prepared.height, prepared.width, 3), 0.5, dtype=np.float32)
 
     def render_layers(
         self, prepared, lights, ambient=0.2,
         ambient_subject=None, ambient_background=None,
         shadow_style="off", output_resolution=None,
+        calibration=None,
     ) -> dict[str, np.ndarray]:
         self.last_lights = list(lights)
         self.last_ambient = ambient
+        self.last_calibration = calibration
         h = output_resolution[1] if output_resolution else prepared.height
         w = output_resolution[0] if output_resolution else prepared.width
         result = {"Ambient": np.full((h, w, 3), 0.3, dtype=np.float32)}
@@ -58,6 +62,7 @@ class FakeEngine:
         ambient_subject=None, ambient_background=None,
         shadow_style="off",
         prompt="", seed=None, output_resolution=None,
+        calibration=None,
     ) -> np.ndarray:
         if self.polish_raises is not None:
             raise self.polish_raises
@@ -66,6 +71,7 @@ class FakeEngine:
         self.last_ambient_subject = ambient_subject
         self.last_ambient_background = ambient_background
         self.last_shadow_style = shadow_style
+        self.last_calibration = calibration
         self.last_prompt = prompt
         self.last_seed = seed
         h = output_resolution[1] if output_resolution else prepared.height

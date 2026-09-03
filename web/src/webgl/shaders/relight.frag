@@ -21,6 +21,13 @@ uniform float u_ambient;
 uniform float u_ambient_subject;
 uniform float u_ambient_background;
 uniform int u_debugView;
+// Multi-pass accumulation (renderer.js draw): 0 = single pass straight to the
+// canvas (clamp, mask overlay, sRGB encode); 1 = write linear vec4(total, 1)
+// into the accumulation target, no clamp/overlay/encode.
+uniform int u_outputMode;
+// 1 on passes after the first: no ambient term and no reflector pass, so the
+// additive blend only adds this chunk's emitters.
+uniform int u_skipAmbient;
 
 uniform int  u_l_type[MAX_LIGHTS];
 uniform vec3 u_l_position[MAX_LIGHTS];
@@ -29,6 +36,32 @@ uniform vec3 u_l_color[MAX_LIGHTS];
 uniform float u_l_intensity[MAX_LIGHTS];
 uniform float u_l_falloff[MAX_LIGHTS];
 uniform float u_l_cone_angle[MAX_LIGHTS];
+
+// ── Metric mode (calibrated scenes) ──────────────────────────────────────
+uniform int   u_metric;                 // 1 = positions in feet
+uniform vec4  u_cam;                    // f, dist_ft, height_ft, u_c
+uniform vec4  u_cam2;                   // va_h, k_y, aspect, depth_ft
+uniform vec3  u_fit;                    // a, b, hasFit(0/1)
+uniform vec3  u_l_position_eng[MAX_LIGHTS];   // engine-space proxy for shadow marching
+uniform vec3  u_l_direction_eng[MAX_LIGHTS];
+uniform int   u_l_shadowDir[MAX_LIGHTS];      // 1 = march along direction (light has no projection)
+// Linear (cyc/strip) lights, type 3: u_l_position is endpoint A, these are B.
+uniform vec3  u_l_endpoint_b[MAX_LIGHTS];      // lighting space (feet when metric)
+uniform vec3  u_l_endpoint_b_eng[MAX_LIGHTS];  // engine-space proxy of B
+
+float metric_zcam(float d) {
+  if (u_fit.z < 0.5) return u_cam.y + d * u_cam2.w;     // no depth fit: linear over stage depth
+  float inv = max(u_fit.x * d + u_fit.y, 1.0 / 10000.0);
+  return clamp(1.0 / inv, 0.5, 10000.0);
+}
+
+vec3 metric_pixel_to_world(vec2 uv, float d) {
+  float zc = metric_zcam(d);
+  float X = (uv.x - u_cam.w) * zc / u_cam.x;
+  float Y = u_cam2.y * (u_cam.z - (uv.y * u_cam2.z - u_cam2.x) * zc / u_cam.x);
+  return vec3(X, Y, zc - u_cam.y);
+}
+
 uniform float u_l_softness[MAX_LIGHTS];
 uniform int  u_l_affects[MAX_LIGHTS];
 uniform int  u_l_enabled[MAX_LIGHTS];
@@ -152,6 +185,10 @@ float sample_gobo(int i, vec2 uv) {
   return 1.0;
 }
 
+// Shared output stage (clamp + mask overlay + sRGB encode) is injected here by
+// renderer.js so this program and the multi-pass blit encode identically.
+//__OUTPUT_STAGE__
+
 void main() {
   vec3 original = texture(u_original, v_uv).rgb;  // already linear (sRGB sampler)
   float depth = texture(u_depth, v_uv).r;
@@ -164,13 +201,20 @@ void main() {
   if (u_debugView == 2) { fragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
   if (u_debugView == 3) { fragColor = vec4(vec3(maskV), 1.0); return; }
 
-  vec3 P = vec3(v_uv.x, v_uv.y, depth);
+  vec3 P = vec3(v_uv.x, v_uv.y, depth);            // engine space (shadows, gobo ortho)
+  vec3 Pw = P;                                      // lighting-space position
+  vec3 Nw = N;                                      // lighting-space normal
+  if (u_metric == 1) {
+    Pw = metric_pixel_to_world(v_uv, depth);
+    Nw = vec3(N.x, -N.y, -N.z);
+  }
 
   // Confidence weights only the per-light contributions (not ambient), so
   // low-confidence regions still get ambient illumination from the original.
   // Per-zone ambient: subject vs background blended by mask. When no mask is
   // present we fall back to the global ambient.
-  float ambient_v = u_haveMask == 1
+  float ambient_v = u_skipAmbient == 1 ? 0.0
+    : u_haveMask == 1
     ? mix(u_ambient_background, u_ambient_subject, maskV)
     : u_ambient;
   vec3 total = ambient_v * original;
@@ -179,14 +223,37 @@ void main() {
     if (u_l_enabled[i] == 0) continue;
 
     vec3 Lvec; float atten;
-    if (u_l_type[i] == 0) {  // directional
+    vec3 Lvec_eng;                                   // engine-space vector for shadow marching
+    float wrapDiff = -1.0;                           // <0 = not a linear light
+    if (u_l_type[i] == 3) {  // linear (cyc/strip): lit from the closest point on the bar
+      vec3 A = u_l_position[i], B = u_l_endpoint_b[i];
+      vec3 AB = B - A;
+      float t = clamp(dot(Pw - A, AB) / max(dot(AB, AB), 1e-9), 0.0, 1.0);
+      vec3 Q = A + t * AB;
+      vec3 d = Q - Pw; float dist = length(d) + 1e-6;
+      Lvec = d / dist;
+      atten = 1.0 / (1.0 + u_l_falloff[i] * dist * dist);
+      float s = u_l_softness[i];
+      wrapDiff = max(dot(Nw, Lvec) + s, 0.0) / (1.0 + s);
+      vec3 Ae = u_l_position_eng[i], Be = u_l_endpoint_b_eng[i]; vec3 ABe = Be - Ae;
+      float te = clamp(dot(P - Ae, ABe) / max(dot(ABe, ABe), 1e-9), 0.0, 1.0);
+      Lvec_eng = (u_metric == 1 && u_l_shadowDir[i] == 0) ? normalize(Ae + te * ABe - P) : Lvec;
+    } else if (u_l_type[i] == 0) {  // directional
       Lvec = normalize(-u_l_direction[i]);
       atten = 1.0;
+      Lvec_eng = (u_metric == 1) ? normalize(-u_l_direction_eng[i]) : Lvec;
     } else {
-      vec3 d = u_l_position[i] - P;
+      vec3 d = u_l_position[i] - Pw;
       float dist = length(d) + 1e-6;
       Lvec = d / dist;
       atten = 1.0 / (1.0 + u_l_falloff[i] * dist * dist);
+      if (u_metric == 1) {
+        Lvec_eng = (u_l_shadowDir[i] == 1)
+          ? normalize(-u_l_direction_eng[i])
+          : normalize(u_l_position_eng[i] - P);
+      } else {
+        Lvec_eng = Lvec;
+      }
     }
 
     float cone = 1.0;
@@ -201,10 +268,11 @@ void main() {
     float gobo = 1.0;
     if (u_l_hasGobo[i] == 1) {
       vec2 uv;
-      if (u_l_type[i] == 0) uv = ortho_uv(P, u_l_direction[i]);
+      if (u_l_type[i] == 0)                                                // engine-space P and direction
+        uv = ortho_uv(P, (u_metric == 1) ? u_l_direction_eng[i] : u_l_direction[i]);
       else if (u_l_type[i] == 2)
-        uv = perspective_uv(P, u_l_position[i], u_l_direction[i], u_l_cone_angle[i]);
-      else uv = equirect_uv(P, u_l_position[i]);
+        uv = perspective_uv(Pw, u_l_position[i], u_l_direction[i], u_l_cone_angle[i]);
+      else uv = equirect_uv(Pw, u_l_position[i]);
       vec2 c = uv - 0.5;
       float cs = cos(u_l_goboRotation[i]), sn = sin(u_l_goboRotation[i]);
       vec2 r = vec2(cs * c.x - sn * c.y, sn * c.x + cs * c.y);
@@ -213,16 +281,17 @@ void main() {
       if (u_l_goboInvert[i] == 1) gobo = 1.0 - gobo;
     }
 
-    float diff = max(dot(N, Lvec), 0.0);
+    float diff = wrapDiff >= 0.0 ? wrapDiff : max(dot(Nw, Lvec), 0.0);
     float maskW = u_l_affects[i] == 0 ? 1.0
                 : u_l_affects[i] == 1 ? maskV
                 : (1.0 - maskV);
 
-    float shadow = shadow_factor(P, Lvec, maskV);
+    float shadow = shadow_factor(P, Lvec_eng, maskV);
     total += original * u_l_color[i] * u_l_intensity[i] * diff * atten * cone * gobo * maskW * confV * shadow;
   }
 
   for (int i = 0; i < MAX_REFLECTORS; i++) {
+    if (u_skipAmbient == 1) break;               // reflectors are accumulated once, in pass 1
     if (i >= u_reflectorCount) break;
     if (u_r_enabled[i] == 0) continue;
 
@@ -262,21 +331,11 @@ void main() {
     total += maskAffect * (diffuse_c + glossy_c);
   }
 
-  total = clamp(total, vec3(0.0), vec3(1.0));
-  // Refine-mode mask overlay: blend a translucent blue over masked pixels so
-  // the user can see what's currently selected. Applied in linear space then
-  // sRGB-encoded below with everything else.
-  if (u_maskOverlay == 1 && u_haveMask == 1) {
-    vec3 tint = vec3(0.18, 0.45, 0.95);
-    total = mix(total, tint, maskV * 0.45);
+  if (u_outputMode == 1) {
+    // Linear accumulation pass: the blit program applies output_stage once
+    // all chunks have been summed.
+    fragColor = vec4(total, 1.0);
+    return;
   }
-  // Linear → sRGB (IEC 61966-2-1 piecewise) — matches engine io._linear_to_srgb.
-  // Without this, the canvas backbuffer (RGBA8, no sRGB framebuffer) makes linear
-  // mid-tones display ~2× too dark vs the exported PNG (which is sRGB-encoded + ICC-tagged).
-  vec3 srgb = mix(
-    total * 12.92,
-    (1.0 + 0.055) * pow(max(total, vec3(1e-6)), vec3(1.0 / 2.4)) - 0.055,
-    step(vec3(0.0031308), total)
-  );
-  fragColor = vec4(srgb, 1.0);
+  fragColor = vec4(output_stage(total, maskV), 1.0);
 }

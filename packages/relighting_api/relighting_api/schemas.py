@@ -5,11 +5,140 @@ These models 422 on bad input; conversion to engine dataclasses happens via
 """
 from __future__ import annotations
 
-from typing import Annotated, Literal
+import math
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from relighting_engine.lighting.models import Gobo, Light
+from relighting_engine.metric.calibration import Calibration
+
+_MARK_KEYS = ("lipL", "lipR", "top", "backL", "backR")
+_MARK_RANGE = (-0.5, 1.5)        # marks may sit a little outside the photo, never far
+_MIN_LIP_FRACTION = 0.05         # same as web/src/metric/calibration.js MIN_LIP_FRACTION
+
+Finite = Annotated[float, Field(allow_inf_nan=False)]
+
+
+class DepthFitModel(BaseModel):
+    a: Finite
+    b: Finite
+
+
+class CalibrationModel(BaseModel):
+    version: int = 1
+    units: Literal["ft", "m"] = "ft"
+    width_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    height_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    depth_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    marks: dict[str, list[float]]
+    depth_fit: DepthFitModel | None = None
+    depth_check: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _validate_marks(self) -> "CalibrationModel":
+        """Mirror of web/src/metric/calibration.js validateMarks, so a
+        degenerate record is a 422 here rather than a ZeroDivisionError in
+        solve_camera (500) or NaNs in a render."""
+        m = self.marks
+        for k in _MARK_KEYS:
+            v = m.get(k)
+            if not (isinstance(v, list) and len(v) == 2):
+                raise ValueError(f"marks.{k} must be [u, v]")
+            for c in v:
+                if not (isinstance(c, (int, float)) and math.isfinite(c)):
+                    raise ValueError(f"marks.{k} must be finite numbers")
+                if not (_MARK_RANGE[0] <= c <= _MARK_RANGE[1]):
+                    raise ValueError(f"marks.{k} is outside the photo")
+        w_lip = abs(m["lipR"][0] - m["lipL"][0])
+        w_back = abs(m["backR"][0] - m["backL"][0])
+        v_lip = (m["lipL"][1] + m["lipR"][1]) / 2.0
+        v_back = (m["backL"][1] + m["backR"][1]) / 2.0
+        if w_lip < _MIN_LIP_FRACTION:
+            raise ValueError("lip marks are too close together")
+        if m["top"][1] >= v_lip:
+            raise ValueError("top of opening must be above the lip")
+        if w_back >= w_lip:
+            raise ValueError("back line must be narrower than the lip")
+        if v_back >= v_lip:
+            raise ValueError("back line must appear above the lip line")
+        return self
+
+    def to_engine(self, aspect: float) -> Calibration:
+        return Calibration.from_dict(self.model_dump(), aspect)
+
+
+# ─── Venues (Spec 2) ─────────────────────────────────────────────────────────
+
+class GridModel(BaseModel):
+    rows: Annotated[int, Field(ge=1, le=6)] = 3
+    cols: Annotated[int, Field(ge=1, le=6)] = 3
+    number_from_stage_left: bool = False
+
+
+HeightRef = Literal["deck", "house_floor", "ceiling"]
+
+
+class HouseModel(BaseModel):
+    """The room around the proscenium (calibration cube spec): wall X
+    positions, how far the house floor sits below the deck, the ceiling
+    height above the deck, and the house depth toward the camera. `estimated`
+    stays true until a user edits any value."""
+    left_wall_ft: Finite
+    right_wall_ft: Finite
+    floor_drop_ft: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
+    ceiling_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    depth_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    estimated: bool = False
+
+
+class PositionModel(BaseModel):
+    """A hanging position in the Spec 1 world frame (feet). Pipes need a trim
+    height, booms an X offset, floor positions only an upstage distance.
+    `trim_ft` stays deck-relative; `height_ref`/`height_input_ft` record how
+    the user stated the height (above the deck, above the house floor, or as
+    a drop below the ceiling)."""
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    kind: Literal["pipe", "boom", "floor"]
+    upstage_ft: Finite
+    trim_ft: Finite | None = None
+    offset_ft: Finite | None = None
+    height_ref: HeightRef = "deck"
+    height_input_ft: Finite | None = None
+
+    @model_validator(mode="after")
+    def _validate_kind(self) -> "PositionModel":
+        if self.kind == "pipe" and self.trim_ft is None:
+            raise ValueError("pipe position needs trim_ft")
+        if self.kind == "boom" and self.offset_ft is None:
+            raise ValueError("boom position needs offset_ft")
+        return self
+
+
+class VenueModel(BaseModel):
+    name: str = Field(min_length=1)
+    width_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    height_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    depth_ft: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    grid: GridModel = Field(default_factory=GridModel)
+    focus_height_ft: Annotated[float, Field(ge=0.0, allow_inf_nan=False)] = 5.0
+    positions: list[PositionModel] = Field(default_factory=list)
+    house: HouseModel | None = None
+    default_height_ref: HeightRef = "deck"
+
+    @model_validator(mode="after")
+    def _validate_house(self) -> "VenueModel":
+        h = self.house
+        if h is None:
+            return self
+        if h.left_wall_ft >= h.right_wall_ft:
+            raise ValueError("house left wall must be left of the right wall")
+        if h.right_wall_ft - h.left_wall_ft < self.width_ft:
+            raise ValueError("house must be at least as wide as the stage")
+        if h.ceiling_ft <= self.height_ft:
+            raise ValueError("house ceiling must be above the opening height")
+        return self
 
 
 class GoboModel(BaseModel):
@@ -32,7 +161,7 @@ class GoboModel(BaseModel):
 
 
 class LightModel(BaseModel):
-    type: Literal["directional", "point", "spotlight", "reflector"]
+    type: Literal["directional", "point", "spotlight", "reflector", "linear"]
     position: list[float] = Field(default_factory=lambda: [0.0, 0.0, -1.0])
     direction: list[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0])
     target: list[float] | None = None
@@ -47,10 +176,27 @@ class LightModel(BaseModel):
     affects: Literal["all", "subject", "background"] = "all"
     enabled: bool = True
     name: str = ""
+    position_ft: list[float] | None = None
+    target_ft: list[float] | None = None
+    direction_ft: list[float] | None = None
+    # Linear (cyc/strip) lights: bar endpoints, feet and engine.
+    endpoint_a_ft: list[float] | None = None
+    endpoint_b_ft: list[float] | None = None
+    endpoint_a: list[float] | None = None
+    endpoint_b: list[float] | None = None
     normal: list[float] = Field(default_factory=lambda: [0.0, 0.0, -1.0])
     size: list[float] = Field(default_factory=lambda: [0.6, 0.4])
     reflectance: Annotated[float, Field(ge=0.0, le=1.0)] = 0.7
     roughness: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
+
+    @model_validator(mode="after")
+    def _validate_ft(self) -> "LightModel":
+        for k in ("position_ft", "target_ft", "direction_ft",
+                  "endpoint_a_ft", "endpoint_b_ft", "endpoint_a", "endpoint_b"):
+            v = getattr(self, k)
+            if v is not None and len(v) != 3:
+                raise ValueError(f"{k} must have 3 components")
+        return self
 
     def to_engine(self) -> Light:
         l = Light(
@@ -69,6 +215,13 @@ class LightModel(BaseModel):
             affects=self.affects,
             enabled=self.enabled,
             name=self.name,
+            position_ft=tuple(self.position_ft) if self.position_ft else None,
+            target_ft=tuple(self.target_ft) if self.target_ft else None,
+            direction_ft=tuple(self.direction_ft) if self.direction_ft else None,
+            endpoint_a_ft=tuple(self.endpoint_a_ft) if self.endpoint_a_ft else None,
+            endpoint_b_ft=tuple(self.endpoint_b_ft) if self.endpoint_b_ft else None,
+            endpoint_a=tuple(self.endpoint_a) if self.endpoint_a else None,
+            endpoint_b=tuple(self.endpoint_b) if self.endpoint_b else None,
             normal=(self.normal[0], self.normal[1], self.normal[2]),
             size=(self.size[0], self.size[1]),
             reflectance=self.reflectance,
@@ -89,6 +242,7 @@ class RenderCommon(BaseModel):
     output_format: Literal["png", "jpeg", "tiff"] = "png"
     output_bit_depth: Literal[8, 16, 32] = 8
     output_resolution: list[int] | None = None
+    calibration: CalibrationModel | None = None
 
     @model_validator(mode="after")
     def _validate_format_bitdepth(self) -> "RenderCommon":
@@ -123,6 +277,7 @@ class RenderLayersRequest(BaseModel):
     shadow_style: Literal["off", "heightfield", "planar"] = "off"
     output_resolution: list[int] | None = None
     scene_name: str = ""
+    calibration: CalibrationModel | None = None
 
 
 class GoboPreset(BaseModel):

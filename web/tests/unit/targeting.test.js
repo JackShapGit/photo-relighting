@@ -54,3 +54,13 @@ test('applyTargeting: writes derived direction in place when targeted, no-op oth
   applyTargeting(F);
   assert.ok(vclose(F.direction, [1, 0, 0]));
 });
+
+test('applyTargeting on a calibrated targeted light makes the engine direction the flipped feet direction', () => {
+  // Engine target - position would give (0, 0, -1); the feet-space beam says otherwise.
+  const L = { type: 'spotlight', position: [0.5, 0.5, 1], target: [0.5, 0.5, 0], direction: [0, 0, -1],
+    position_ft: [0, 20, -60], target_ft: [0, 5, 10] };
+  applyTargeting(L);
+  const n = Math.hypot(0, -15, 70);
+  assert.ok(vclose(L.direction_ft, [0, -15 / n, 70 / n]));
+  assert.ok(vclose(L.direction, [0, 15 / n, -70 / n]), 'direction = worldDirToEngine(direction_ft)');
+});

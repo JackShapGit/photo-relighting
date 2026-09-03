@@ -12,9 +12,11 @@
  */
 import * as THREE from 'three';
 
-import { Z_SCALE, pixelToWorld } from './coords.js';
+import { Z_SCALE, pixelToWorld, worldFtToThree } from './coords.js';
+import { depthToZcam, effectiveFit, pixelToWorld as pixelToWorldFt } from '../metric/calibration.js';
 
 const MAX_POINTS = 1_000_000;
+const _tmp = new THREE.Vector3();
 // Cap the mirror canvas's long edge so per-frame texture uploads stay cheap.
 // The point cloud is stride-downsampled to ~1M points anyway — a higher-
 // resolution texture wastes GPU bandwidth without adding visible detail.
@@ -62,7 +64,14 @@ const FRAG_SRC = `
   }
 `;
 
-export async function buildPointCloud({ originalUrl, depthUrl, sourceCanvas2D, zScale = Z_SCALE }) {
+/** World-unit scale of a calibrated scene relative to the engine frame (which
+ * spans ~2 units): half the stage width in feet. Used so point size, hit
+ * thresholds and light primitives keep a similar screen size. */
+export function metricScale(calibration) {
+  return calibration ? Math.max(1, calibration.width_ft / 2) : 1;
+}
+
+export async function buildPointCloud({ originalUrl, depthUrl, sourceCanvas2D, zScale = Z_SCALE, calibration = null }) {
   const [origData, depthData] = await Promise.all([
     loadImageData(originalUrl),
     loadImageData(depthUrl),
@@ -85,12 +94,36 @@ export async function buildPointCloud({ originalUrl, depthUrl, sourceCanvas2D, z
   const uvs = new Float32Array(n * 2);
   const depthPx = depthData.data;   // RGBA uint8 (depth in R)
 
+  // Bounds of the *stage-range* points (Three frame). Calibrated depth fits
+  // send background pixels toward Z_CAM_MAX (10 000 ft), which would make the
+  // raw bounding box useless for framing and fixture classification, so only
+  // points within [−0.5·D, 2·D] of the lip in world Z and a sane X/Y band
+  // count. Uncalibrated clouds use their full extent.
+  const bounds = new THREE.Box3();
+  const D = calibration?.depth_ft ?? 0;
+  const Wft = calibration?.width_ft ?? 0;
+  const Hft = calibration?.height_ft ?? 0;
+  const fit = calibration ? effectiveFit(calibration) : null;
+
   let i = 0;
   for (let r = 0; r < H; r += stride) {
     for (let c = 0; c < W; c += stride) {
       const idx = (r * W + c) * 4;
       const d = depthPx[idx] / 255;
-      const [x, y, z] = pixelToWorld(c, r, d, W, H, zScale);
+      let x, y, z;
+      if (calibration) {
+        // Calibrated: per-pixel position in feet via the same camera model the
+        // shader uses (metric_pixel_to_world), then into the Three frame.
+        const zc = depthToZcam(d, fit);      // fitted, or the linear fallback without a fit
+        const [X, Y, Z] = pixelToWorldFt(c / (W - 1), r / (H - 1), zc, calibration.camera);
+        [x, y, z] = worldFtToThree([X, Y, Z]);
+        if (Z >= -0.5 * D && Z <= 2 * D && Math.abs(X) <= 1.5 * Wft && Y >= -0.5 * Hft && Y <= 3 * Hft) {
+          bounds.expandByPoint(_tmp.set(x, y, z));
+        }
+      } else {
+        [x, y, z] = pixelToWorld(c, r, d, W, H, zScale);
+        bounds.expandByPoint(_tmp.set(x, y, z));
+      }
       positions[i * 3 + 0] = x;
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = z;
@@ -133,7 +166,9 @@ export async function buildPointCloud({ originalUrl, depthUrl, sourceCanvas2D, z
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       u_map:     { value: texture },
-      u_size:    { value: 0.005 },  // world-space size; matches old PointsMaterial.size
+      // world-space size; matches old PointsMaterial.size. Scaled with the
+      // stage width in calibrated scenes so points keep a similar screen size.
+      u_size:    { value: 0.005 * metricScale(calibration) },
       u_opacity: { value: 0.8 },
     },
     vertexShader: VERT_SRC,
@@ -165,6 +200,7 @@ export async function buildPointCloud({ originalUrl, depthUrl, sourceCanvas2D, z
     width: W,
     height: H,
     stride,
+    bounds,   // THREE.Box3 of the stage-range points (see above)
   };
 }
 

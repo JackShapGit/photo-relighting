@@ -1,6 +1,6 @@
 # Cloudflare Tunnel — demo access runbook
 
-Expose `localhost:8000` at `https://relight.<yourdomain>` for occasional
+Expose `localhost:8001` at `https://relight.<yourdomain>` for occasional
 demos, gated by a shared password. Reflects the design in
 `docs/superpowers/specs/2026-05-21-cloudflare-tunnel-demo-access-design.md`.
 
@@ -48,7 +48,7 @@ tunnel: <UUID-from-step-4>
 credentials-file: C:\Users\Owner\.cloudflared\<UUID>.json
 ingress:
   - hostname: relight.<yourdomain>
-    service: http://localhost:8000
+    service: http://localhost:8001
   - service: http_status:404
 ```
 
@@ -109,7 +109,7 @@ No tunnel restart needed.
 .\start-demo.bat
 ```
 
-Uvicorn starts on `127.0.0.1:8000`. Share with the audience:
+Uvicorn starts on `127.0.0.1:8001`. Share with the audience:
 - URL: `https://relight.<yourdomain>`
 - Username: anything
 - Password: the value in `.env.demo`
@@ -141,10 +141,10 @@ If `https://relight.<yourdomain>` does not work, walk this ladder:
 
    Expect a CNAME to `<UUID>.cfargotunnel.com`.
 
-3. **Is the app on :8000?**
+3. **Is the app on :8001?**
 
    ```powershell
-   curl.exe -i -u demo:$env:RELIGHT_DEMO_PASSWORD http://127.0.0.1:8000/healthz
+   curl.exe -i -u demo:$env:RELIGHT_DEMO_PASSWORD http://127.0.0.1:8001/healthz
    ```
 
    Expect HTTP 200. If 401, the password in your shell does not match the
@@ -163,6 +163,23 @@ If `https://relight.<yourdomain>` does not work, walk this ladder:
   typical; edge cases with very large output resolution could approach
   the limit and return HTTP 524.
 - Cloudflare outage takes the demo down. Rare, no remediation.
+- Venues (Spec 2 rigs: stage dimensions and hang positions) live in the same
+  SQLite DB as scenes (`RELIGHT_SCENES_DB`, default `cache/scenes.db`), so
+  back up or relocate scenes and venues together.
+
+## Running the Playwright suite next to a dev server
+
+`web/tests/playwright.config.js` starts its own uvicorn on port 8765 with
+`reuseExistingServer: true`. If a dev server is already listening on 8765
+(for example one started from the project root for manual checks), Playwright
+silently reuses it: the parity and calibrated-smoke specs then create their
+scenes and prepared sessions in that server's **real** `cache/scenes.db` and
+`cache/sessions/`, and the run is invalid as evidence because it did not
+exercise a fresh server. Run the suite only when nothing is listening on 8765
+(`netstat -ano | findstr :8765` must be empty), and stop any dev server on
+that port first; the demo server on 8001 is unaffected. Playwright's own
+server runs with `web/tests/` as its working directory, so its scenes, venues
+and sessions land in the gitignored `web/tests/cache/`, never in `cache/`.
 
 ## Uninstall
 

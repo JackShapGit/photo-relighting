@@ -53,6 +53,19 @@ export function worldToLight(pos, zScale = Z_SCALE) {
   ];
 }
 
+/**
+ * A normalized 2D-photo click (u, v in [0,1]) plus a sampled depth (0..1) →
+ * engine light-position coords [x, y, z].
+ *
+ * Engine x/y equal the normalized image coords (the same space the 2D handles
+ * use). The engine z works out to exactly 1 - depth: worldToLight inverts the
+ * (depth-0.5)*Z_SCALE mapping and the Z_SCALE cancels. depth 0 (nearest) → z 1.0
+ * (camera side); depth 1 (farthest) → z 0.0.
+ */
+export function uvDepthToLight(u, v, depth) {
+  return [u, v, 1 - depth];
+}
+
 /** Engine direction unit vector → world unit vector.
  *
  * Applies the linear part of the lightToWorld transform (Z flipped) then
@@ -66,6 +79,13 @@ export function directionToWorld(dir, zScale = Z_SCALE) {
   const len = Math.hypot(wx, wy, wz) || 1;
   return [wx / len, wy / len, wz / len];
 }
+
+/** Calibrated scenes: the Three.js frame is the world frame in FEET with Z
+ * negated (world +Z = upstage, Three +z = toward the house), so the camera on
+ * the negative-Three-z side keeps looking from the house toward the stage.
+ * Works for positions and for direction vectors alike. */
+export function worldFtToThree([X, Y, Z]) { return [X, Y, -Z]; }
+export function threeToWorldFt([x, y, z]) { return [x, y, -z]; }
 
 /** World unit vector → engine direction unit vector. Inverse of directionToWorld. */
 export function worldToDirection(worldDir, zScale = Z_SCALE) {

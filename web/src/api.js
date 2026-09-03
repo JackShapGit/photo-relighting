@@ -13,10 +13,14 @@ const WORKSPACE = (() => {
 
 export function currentWorkspace() { return WORKSPACE; }
 
-function wsUrl(path) {
+export function wsUrl(path) {
   const sep = path.includes('?') ? '&' : '?';
   return `${path}${sep}workspace=${encodeURIComponent(WORKSPACE)}`;
 }
+
+// Venues (Spec 2) live in their own module but are re-exported here so the
+// app keeps one API import.
+export { listVenues, createVenue, getVenue, updateVenue, deleteVenue, duplicateVenue } from './rig/venue-api.js';
 
 export async function prepare(file, mode, segmenter = 'rmbg') {
   const fd = new FormData();
@@ -141,6 +145,22 @@ export async function importScene(file) {
   return r.json();
 }
 
+// ─── Calibration cross-check ─────────────────────────────────────────────
+
+// Optional metric-depth cross-check of a stage calibration record. The server
+// answers { available: false, median_error_pct: null } when the metric model
+// is not installed; callers treat every failure as "no opinion".
+export async function checkCalibration(sceneId, calibration) {
+  const r = await fetch(wsUrl(`/scenes/${sceneId}/calibration/check`), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ calibration }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!r.ok) throw new Error(`/scenes calibration/check: ${r.status}`);
+  return r.json();
+}
+
 // ─── Polish API ──────────────────────────────────────────────────────────
 
 export async function getCapabilities() {
@@ -155,7 +175,7 @@ export async function polishScene({ sessionId, lights, ambient,
                                     shadowStyle,
                                     prompt = '', seed = null,
                                     outputFormat = 'png', outputBitDepth = 8,
-                                    outputResolution = null }) {
+                                    outputResolution = null, calibration = null }) {
   const r = await fetch('/polish', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -163,6 +183,7 @@ export async function polishScene({ sessionId, lights, ambient,
       session_id: sessionId,
       lights,
       ambient,
+      calibration,
       ambient_subject: ambientSubject,
       ambient_background: ambientBackground,
       shadow_style: shadowStyle,

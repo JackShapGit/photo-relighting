@@ -9,6 +9,15 @@ import { ensureGoboTexture } from './webgl/renderer.js';
 import { SCENE_ID, findNode } from './lights.js';
 import { PRESETS } from './presets.js';
 import { isTargeted, targetSpawnPoint, applyTargeting } from './targeting.js';
+import { toDisplay, parseLength } from './metric/units.js';
+import { syncLightFromFeet } from './metric/light-metric.js';
+import { readoutCells } from './metric/measure.js';
+import { FIXTURE_TYPES, PRESETS as FIXTURE_PRESETS } from './rig/presets.js';
+import { detachFixture, detachAim, findPosition, setLightType, tryEnable } from './rig/fixture-sync.js';
+import { areaLabels } from './rig/geometry.js';
+import {
+  optionControl, validOffset, setFixtureType, setFixtureOption, setFixturePosition, setFixtureOffset, setFixtureArea,
+} from './rig/rig-tab.js';
 
 const SLOT_VARS = ['--slot-key', '--slot-fill', '--slot-rim'];
 
@@ -41,7 +50,7 @@ export function setGoboPresets(presets) {
   goboPresets = presets;
 }
 
-export function renderProps(state, container, redraw, onStructural) {
+export function renderProps(state, container, redraw, onStructural, onRigEdit) {
   if (state.selectedId === SCENE_ID) {
     renderSceneProps(state, container, redraw);
     return;
@@ -56,7 +65,7 @@ export function renderProps(state, container, redraw, onStructural) {
     return;
   }
   const idx = state.lights.indexOf(node);
-  renderLightProps(node, idx, container, redraw, onStructural);
+  renderLightProps(node, idx, container, redraw, onStructural, state, onRigEdit);
 }
 
 function renderGroupProps(G, container) {
@@ -105,15 +114,31 @@ export function renderAddLightPicker(state, container, onPick) {
         </button>
       `).join('')}
     </div>
+    <h3 class="preset-section">Fixtures</h3>
+    <p class="props-empty">Theatre instruments. Added as Custom; the Rig tab hangs them on a position.</p>
+    <div class="preset-grid">
+      ${FIXTURE_TYPES.map((t) => `
+        <button class="preset-card fixture-card" type="button" data-fixture="${t.id}" title="${escapeHtml(t.label)}">
+          <div class="preset-thumb"><span class="preset-glyph">◆</span></div>
+          <div class="preset-name">${escapeHtml(t.label)}</div>
+        </button>
+      `).join('')}
+    </div>
     <div class="modal-actions">
       <button id="add-cancel" type="button">Cancel</button>
     </div>
   `;
-  for (const card of container.querySelectorAll('.preset-card')) {
+  for (const card of container.querySelectorAll('.preset-card:not(.fixture-card)')) {
     card.addEventListener('click', () => {
       const id = card.dataset.id;
       const preset = PRESETS.find((p) => p.id === id);
       onPick?.(preset || null);
+    });
+  }
+  for (const card of container.querySelectorAll('.fixture-card')) {
+    card.addEventListener('click', () => {
+      const t = FIXTURE_TYPES.find((x) => x.id === card.dataset.fixture);
+      onPick?.(t ? { kind: 'fixture', id: t.id, label: t.label } : null);
     });
   }
   container.querySelector('#add-cancel').addEventListener('click', () => onPick?.(null));
@@ -209,7 +234,7 @@ function renderSceneProps(state, container, redraw) {
   });
 }
 
-function renderLightProps(L, slotIdx, container, redraw, onStructural) {
+function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {}, onRigEdit = null) {
   if (L.type === 'reflector') {
     renderReflectorProps(L, slotIdx, container, redraw);
     return;
@@ -221,19 +246,54 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural) {
 
   const canTarget = L.type === 'directional' || L.type === 'spotlight';
 
+  // Calibrated scenes edit the light in feet/meters (world frame); the
+  // engine-space Position Z slider is hidden then because position_ft is
+  // authoritative and the engine position is derived from it.
+  const units = state.units || 'ft';
+  const metric = !!(state.calibration && L.position_ft);
+  const ftFields = (cls) => `
+      <label>Stage L/R <input class="${cls}-x" type="number" step="0.1" /></label>
+      <label>Height <input class="${cls}-y" type="number" step="0.1" /></label>
+      <label>Upstage <input class="${cls}-z" type="number" step="0.1" /></label>`;
+  const posBlock = metric ? `
+    <fieldset class="metric-pos"><legend>Position (${units})</legend>${ftFields('pos')}
+    </fieldset>
+    ${L.target_ft ? `<fieldset class="metric-tgt"><legend>Target (${units})</legend>${ftFields('tgt')}
+    </fieldset>` : ''}` : '';
+
+  // Rig mode (Spec 2): a fixture's type / option / position / offset / area
+  // live in a compact fieldset above the light controls, sharing the rig
+  // tab's setters so both places behave the same.
+  const rig = !!(state.venue && state.calibration?.camera && L.fixture);
+  const rigPos = rig ? findPosition(state.venue, L.fixture.position_id) : null;
+  const rigBlock = rig ? `
+    <fieldset class="rig-props"><legend>Rig</legend>
+      <label>Fixture <select class="rig-type">${FIXTURE_TYPES.map((t) => `<option value="${t.id}">${escapeHtml(t.label)}</option>`).join('')}</select></label>
+      <label class="rig-option-row"><span class="rig-option-label"></span><span class="rig-option-slot"></span></label>
+      <label>Position <select class="rig-position"><option value="">Custom</option>${state.venue.positions.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('')}</select></label>
+      ${rigPos ? `<label>${rigPos.kind === 'boom' ? 'Height' : 'Offset'} (${units}) <input class="rig-offset" type="text" inputmode="decimal" /></label>` : ''}
+      <label>Area <select class="rig-area"><option value="">—</option>${areaLabels(state.venue.grid).map((a) => `<option value="${a}">${a}</option>`).join('')}</select></label>
+    </fieldset>` : '';
+
   container.innerHTML = `
     <div class="props-header">
       <span class="slot-dot" style="background: ${slotColor(slotIdx)}"></span>
       <h2 class="props-name">${escapeHtml(L.name)}</h2>
     </div>
+    ${rigBlock}
+    <div class="readout-block">
+      <div class="readout-row"><span class="readout-key">Throw (${units})</span><span class="readout-val" data-readout="throw">—</span></div>
+      <div class="readout-row"><span class="readout-key">Field Ø (${units})</span><span class="readout-val" data-readout="dia">—</span></div>
+    </div>
     <label>Type
-      <select class="type">
+      <select class="type" ${rig ? 'disabled title="Set by the fixture type"' : ''}>
         <option value="directional">directional</option>
         <option value="point">point</option>
         <option value="spotlight">spotlight</option>
+        <option value="linear">linear</option>
       </select>
     </label>
-    <label>Position Z <input class="position-z" type="range" min="-2" max="3" step="0.05" /></label>
+    ${metric ? posBlock : '<label>Position Z <input class="position-z" type="range" min="-2" max="3" step="0.05" /></label>'}
     <label>Direction Z <input class="direction-z" type="range" min="-1" max="1" step="0.02" /></label>
     ${canTarget ? '<label class="checkbox-row"><input type="checkbox" class="aim-at-target" /> Aim at target</label>' : ''}
     <label>Intensity <input class="intensity" type="range" min="0" max="3" step="0.01" /></label>
@@ -251,12 +311,77 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural) {
       </select>
     </label>
     <label class="checkbox-row"><input type="checkbox" class="enabled" /> enabled</label>
+    <div class="props-msg" hidden></div>
   `;
+
+  // Spec 3: throw and field diameter for the selected fixture. The block's
+  // markup lives in the template above, next to the rig fields it describes;
+  // updateReadoutBlock fills it in so a drag can refresh it without
+  // re-rendering the whole props pane.
+  updateReadoutBlock(container, L, state.venue, state.units || 'ft');
 
   const $ = (sel) => container.querySelector(sel);
 
+  if (rig) {
+    const venue = state.venue, record = state.calibration;
+    const done = () => (onRigEdit ? onRigEdit() : onStructural?.());
+    const f = L.fixture;
+    $('.rig-type').value = f.type;
+    $('.rig-type').addEventListener('change', (e) => { setFixtureType(L, e.target.value, venue, record); done(); });
+    $('.rig-position').value = f.position_id || '';
+    $('.rig-position').addEventListener('change', (e) => { setFixturePosition(L, e.target.value || null, venue, record); done(); });
+    const areaSel = $('.rig-area');
+    areaSel.value = f.area || '';
+    areaSel.disabled = (FIXTURE_PRESETS[f.type] || FIXTURE_PRESETS.other).aimed === 'none';
+    areaSel.addEventListener('change', (e) => { setFixtureArea(L, e.target.value || null, venue, record); done(); });
+    const offIn = $('.rig-offset');
+    if (offIn) {
+      offIn.value = toDisplay(f.offset_ft ?? 0, units).toFixed(1);
+      offIn.addEventListener('change', (e) => {
+        const ft = parseLength(e.target.value, units);
+        if (ft == null || !validOffset(rigPos, ft, venue)) { e.target.value = toDisplay(f.offset_ft ?? 0, units).toFixed(1); return; }
+        setFixtureOffset(L, ft, venue, record); done();
+      });
+    }
+    // Option control per type: barrel/lamp select, beam number, cyc length.
+    const ctl = optionControl(f.type);
+    const row = $('.rig-option-row');
+    if (ctl.kind === 'none') row.hidden = true;
+    else {
+      $('.rig-option-label').textContent = ctl.kind === 'length' ? `${ctl.label} (${units})` : ctl.label;
+      const slot = $('.rig-option-slot');
+      let input;
+      if (ctl.kind === 'select') {
+        input = document.createElement('select');
+        input.innerHTML = ctl.values.map((v) => `<option value="${v}">${typeof v === 'number' ? `${v}°` : v}</option>`).join('');
+        input.value = String(f[ctl.key]);
+        input.addEventListener('change', () => { setFixtureOption(L, typeof ctl.values[0] === 'number' ? Number(input.value) : input.value, venue, record); done(); });
+      } else if (ctl.kind === 'length') {
+        input = document.createElement('input');
+        input.type = 'text'; input.inputMode = 'decimal';
+        input.value = toDisplay(f.length_ft ?? 4, units).toFixed(1);
+        input.addEventListener('change', () => {
+          const ft = parseLength(input.value, units);
+          if (ft == null || ft <= 0) { input.value = toDisplay(f.length_ft ?? 4, units).toFixed(1); return; }
+          setFixtureOption(L, ft, venue, record); done();
+        });
+      } else {
+        input = document.createElement('input');
+        input.type = 'number'; input.min = ctl.min; input.max = ctl.max; input.step = ctl.step;
+        input.value = f[ctl.key];
+        input.addEventListener('change', () => {
+          const v = parseFloat(input.value);
+          if (!Number.isFinite(v) || v < ctl.min || v > ctl.max) { input.value = f[ctl.key]; return; }
+          setFixtureOption(L, v, venue, record); done();
+        });
+      }
+      input.className = 'rig-option';
+      slot.appendChild(input);
+    }
+  }
+
   $('.type').value = L.type;
-  $('.position-z').value = L.position[2];
+  if (!metric) $('.position-z').value = L.position[2];
   $('.direction-z').value = L.direction[2];
   if (canTarget) {
     const targeted = isTargeted(L);
@@ -276,9 +401,44 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural) {
   const bind = (sel, fn) =>
     $(sel).addEventListener('input', async (e) => { await fn(e.target); redraw(); });
 
-  bind('.type', (t) => { L.type = t.value; });
-  bind('.position-z', (t) => { L.position[2] = parseFloat(t.value); });
+  $('.type').addEventListener('change', (e) => {
+    // A linear light needs endpoints (the server rejects one without); the
+    // shared setter seeds them and re-derives the proxies. Structural: the
+    // 3D primitive and the handles change shape.
+    setLightType(L, e.target.value, state.calibration || null, state.venue || null);
+    if (onStructural) onStructural(); else redraw();
+    renderLightProps(L, slotIdx, container, redraw, onStructural, state, onRigEdit);
+  });
+  if (!metric) bind('.position-z', (t) => { L.position[2] = parseFloat(t.value); });
   bind('.direction-z', (t) => { L.direction[2] = parseFloat(t.value); });
+
+  if (metric) {
+    // Values display in the current unit; edits parse back to feet (accepting
+    // "12.5", "3.8 m", "12'6\"") and re-derive the engine proxies.
+    const fill = (cls, arr) => ['x', 'y', 'z'].forEach((ax, i) => {
+      const el = $(`.${cls}-${ax}`);
+      if (el && arr) el.value = toDisplay(arr[i], units).toFixed(1);
+    });
+    fill('pos', L.position_ft);
+    fill('tgt', L.target_ft);
+    const bindFt = (sel, arrKey, i) => $(sel)?.addEventListener('change', (e) => {
+      const ft = parseLength(e.target.value, units);
+      if (ft == null) return;
+      L[arrKey][i] = ft;
+      // Typed feet are a direct move (Custom) or a direct aim (no area).
+      if (arrKey === 'position_ft') detachFixture(L); else detachAim(L);
+      syncLightFromFeet(L, state.calibration);
+      applyTargeting(L);
+      e.target.value = toDisplay(ft, units).toFixed(1);
+      // The engine position changed too, so the 2D handles must be remounted
+      // (the structural path also syncs the 3D scene and saves).
+      if (onStructural) onStructural(); else redraw();
+    });
+    ['x', 'y', 'z'].forEach((ax, i) => {
+      bindFt(`.pos-${ax}`, 'position_ft', i);
+      if (L.target_ft) bindFt(`.tgt-${ax}`, 'target_ft', i);
+    });
+  }
   if (canTarget) {
     $('.aim-at-target').addEventListener('change', (e) => {
       if (e.target.checked) {
@@ -291,6 +451,10 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural) {
       // does not re-render the props panel, so we update this DOM in place).
       $('.direction-z').disabled = e.target.checked;
       if (onStructural) onStructural();   // remount 2D handles, sync 3D, save
+      // In a calibrated scene the structural sync just created or dropped
+      // target_ft (and re-derived the direction), so the Target fields and the
+      // Direction Z slider must be re-rendered to match.
+      if (metric) renderLightProps(L, slotIdx, container, redraw, onStructural, state);
     });
   }
   bind('.intensity', (t) => { L.intensity = parseFloat(t.value); });
@@ -300,7 +464,14 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural) {
   bind('.softness', (t) => { L.softness = parseFloat(t.value); });
   bind('.falloff', (t) => { L.falloff = parseFloat(t.value); });
   bind('.affects', (t) => { L.affects = t.value; });
-  bind('.enabled', (t) => { L.enabled = t.checked; });
+  $('.enabled').addEventListener('change', (e) => {
+    // Same gate and message as the Rig tab: at most 64 emitters may be on.
+    const r = tryEnable(state.lights || [], L, e.target.checked);
+    const msg = $('.props-msg');
+    if (!r.ok) { e.target.checked = false; msg.hidden = false; msg.textContent = r.message; return; }
+    msg.hidden = true; msg.textContent = '';
+    if (onStructural) onStructural(); else redraw();   // the tree row and the rig table follow
+  });
   bind('.gobo', async (t) => {
     if (t.value) {
       await ensureGoboTexture(t.value);
@@ -310,6 +481,27 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural) {
       L.gobo = null;
     }
   });
+}
+
+/**
+ * Refresh the props-pane readout values in place. Safe to call on every
+ * redraw: it writes only when the text actually changed, and no-ops when the
+ * pane is not showing a light.
+ */
+export function updateReadoutBlock(container, light, venue, units = 'ft') {
+  if (!container || !light) return;
+  const block = container.querySelector('.readout-block');
+  if (!block) return;
+  // One geometry solve for both cells — see readoutCells in measure.js and
+  // the matching shape in rig-tab.js's updateReadouts.
+  const cells = readoutCells(light, venue, units);
+  for (const kind of ['throw', 'dia']) {
+    const el = block.querySelector(`[data-readout="${kind}"]`);
+    if (!el) continue;
+    const { text, title } = cells[kind];
+    if (el.textContent !== text) el.textContent = text;
+    if (el.title !== title) el.title = title;
+  }
 }
 
 function renderReflectorProps(L, slotIdx, container, redraw) {

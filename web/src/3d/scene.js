@@ -18,16 +18,18 @@ export function createScene3D(canvas) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b0b0b);
 
+  // Far plane covers calibrated stages measured in feet (a 40 ft stage seen
+  // from 60+ ft in the house, plus FOH fixtures).
   const perspectiveCamera = new THREE.PerspectiveCamera(
     50,
     1,        // aspect fixed at resize
     0.01,
-    100,
+    5000,
   );
   perspectiveCamera.position.set(...DEFAULT_CAMERA_POSITION);
   perspectiveCamera.lookAt(...DEFAULT_CAMERA_TARGET);
 
-  const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
+  const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 5000);
   orthoCamera.position.set(...DEFAULT_CAMERA_POSITION);
   orthoCamera.lookAt(...DEFAULT_CAMERA_TARGET);
 
@@ -35,6 +37,8 @@ export function createScene3D(canvas) {
   const controls = new OrbitControls(activeCamera, canvas);
   controls.target.set(...DEFAULT_CAMERA_TARGET);
   controls.update();
+
+  let orthoSize = 1.5;   // half-height of the orthographic frustum (world units)
 
   function resize() {
     const rect = canvas.getBoundingClientRect();
@@ -44,7 +48,6 @@ export function createScene3D(canvas) {
     perspectiveCamera.aspect = aspect;
     perspectiveCamera.updateProjectionMatrix();
     // Keep orthographic frustum a constant world-space size; widen for aspect.
-    const orthoSize = 1.5;
     orthoCamera.left = -orthoSize * aspect;
     orthoCamera.right = orthoSize * aspect;
     orthoCamera.top = orthoSize;
@@ -63,10 +66,26 @@ export function createScene3D(canvas) {
     controls.update();
   }
 
-  function resetCamera() {
-    activeCamera.position.set(...DEFAULT_CAMERA_POSITION);
-    controls.target.set(...DEFAULT_CAMERA_TARGET);
+  // Home view. With `bounds` (a THREE.Box3 of stage + lights, calibrated
+  // scenes) the camera sits on the house side (+z) looking at the center so
+  // the whole stage is framed; otherwise today's fixed engine-frame view.
+  let homeBounds = null;
+  function resetCamera(bounds = homeBounds) {
+    homeBounds = bounds || null;
+    if (bounds && !bounds.isEmpty()) {
+      const center = bounds.getCenter(new THREE.Vector3());
+      const radius = Math.max(1e-3, bounds.getSize(new THREE.Vector3()).length() / 2);
+      activeCamera.position.set(center.x, center.y + radius * 0.6, center.z + radius * 1.8);
+      controls.target.copy(center);
+      orthoSize = radius;
+    } else {
+      activeCamera.position.set(...DEFAULT_CAMERA_POSITION);
+      controls.target.set(...DEFAULT_CAMERA_TARGET);
+      orthoSize = 1.5;
+    }
+    activeCamera.lookAt(controls.target);
     controls.update();
+    resize();
   }
 
   function getActiveCamera() { return activeCamera; }

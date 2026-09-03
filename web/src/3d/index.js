@@ -1,9 +1,9 @@
 /** 3D viewport entry point. Mount once, hook lifecycle into main.js. */
 import * as THREE from 'three';
-import './coords.js';
+import { worldToLight, lightToWorld, worldFtToThree, threeToWorldFt } from './coords.js';
 import './sync.js';
-import { buildPointCloud, disposePointCloud } from './point-cloud.js';
-import { disposeLightPrimitive } from './light-primitives.js';
+import { buildPointCloud, disposePointCloud, metricScale } from './point-cloud.js';
+import { disposeLightPrimitive, setLightMetric } from './light-primitives.js';
 import { mountOverlayPanel } from './overlay-panel.js';
 import { createScene3D } from './scene.js';
 import { applyOps, diffLights, setSelected } from './sync.js';
@@ -11,6 +11,11 @@ import { createGizmo } from './gizmos.js';
 import { bindHotkeys } from './hotkeys.js';
 import { isTargeted } from '../targeting.js';
 import { createTargetViz } from './target-viz.js';
+import { buildStage, removeStage, updateStageUnits } from './stage.js';
+import { removeRigOverlay, updateRigOverlay } from './rig-overlay.js';
+import { removeCubes, styleCubes, updateCubes, STAGE_BOX_NAME } from './cube-3d.js';
+import { worldToEngine, engineToWorld, effectiveFit } from '../metric/calibration.js';
+import { updateMeasureOverlay } from './measure-overlay.js';
 
 let api = null;
 let currentPointCloud = null;
@@ -20,10 +25,49 @@ let onLightSelected = null;
 let gizmoApi = null;
 let targetViz = null;
 let onLightChange = null;
+let placement = null;
+let getMedianDepth = () => 0.3;
 const raycaster = new THREE.Raycaster();
+const POINT_HIT_THRESHOLD = 0.03;           // point-cloud hit tolerance for placement (engine units)
+raycaster.params.Points.threshold = POINT_HIT_THRESHOLD;
 const mouse = new THREE.Vector2();
 
-export function mount3D({ onSelectLight, onUpdateLight } = {}) {
+// Calibrated-stage state: the solved calibration record (with camera), the
+// display units for the deck grid, the assets of the loaded scene (so a
+// calibration change can rebuild the cloud), and a load sequence so an
+// overlapping rebuild cannot leave a stale cloud in the scene.
+let metricCal = null;
+let metricVenue = null;         // Spec 2 venue for the rig overlay
+let metricUnits = 'ft';
+let lastAssetUrls = null;
+let loadSeq = 0;
+const isMetric = () => !!metricCal;
+
+// Calibration cube (spec §3D): the last setCubes3D options, re-applied after
+// every rebuild; the stage-box gizmo request (hooks) while the panel is open;
+// whether that gizmo is mid-drag (the box must not be rebuilt under it).
+let cubeOpts = null;
+let boxGizmoHooks = null;
+let boxDragging = false;
+let selectedLightId = null;
+
+// Ruler (Spec 3): the tool instance driving state, and whether it is armed
+// (takes clicks ahead of light selection/orbit in onCanvasClick below).
+let measureTool = null;
+let measureArmed = false;
+
+export function setMeasureTool3D(tool) { measureTool = tool; }
+
+export function setMeasureArmed3D(on) {
+  measureArmed = !!on;
+  if (api?.renderer?.domElement) api.renderer.domElement.style.cursor = measureArmed ? 'crosshair' : '';
+}
+
+export function renderMeasure3D(measurements, units) {
+  updateMeasureOverlay(api?.scene, measurements, units);
+}
+
+export function mount3D({ onSelectLight, onUpdateLight, placement: placementCtl, getMedianDepth: getMedian } = {}) {
   if (api) return api;
   const canvas = document.getElementById('canvas3d');
   if (!canvas) return null;
@@ -31,8 +75,11 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
   api.resize();
   api.start();
   window.addEventListener('resize', api.resize);
+  window.__scene3d = api.scene;   // inspection hook (smoke tests, console)
   onLightSelected = onSelectLight || null;
   onLightChange = onUpdateLight || null;
+  placement = placementCtl || null;
+  if (getMedian) getMedianDepth = getMedian;
 
   const overlayEl = document.getElementById('stage3d-overlay');
   if (overlayEl) {
@@ -45,9 +92,10 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
         onPointSizeChange: (s) => {
           // Slider gives world-space size [0.002, 0.012] which feeds the
           // shader's u_size uniform directly (matches the original
-          // PointsMaterial.size scaling).
+          // PointsMaterial.size scaling); scaled up with the stage width in
+          // calibrated scenes.
           if (currentPointCloud) {
-            currentPointCloud.material.uniforms.u_size.value = s;
+            currentPointCloud.material.uniforms.u_size.value = s * metricScale(metricCal);
           }
         },
         onPointOpacityChange: (o) => {
@@ -69,26 +117,106 @@ export function mount3D({ onSelectLight, onUpdateLight } = {}) {
     canvas,
     orbitControls: api.controls,
     scene: api.scene,
-    onTranslate: (id, pos) => {
-      if (onLightChange) onLightChange(id, { position: pos });
-    },
-    onRotate: (id, vec, field) => {
-      if (onLightChange) onLightChange(id, { [field]: vec });
-    },
-    onTargetMove: (id, pos) => {
-      if (onLightChange) onLightChange(id, { target: pos });
-    },
+    // The gizmo hands back a partial light in the right frame for the mode:
+    // { position } / { direction | normal } / { target } uncalibrated,
+    // { position_ft } / { direction_ft } / { target_ft } when calibrated.
+    onTranslate: (id, patch) => { if (onLightChange) onLightChange(id, patch); },
+    onRotate: (id, patch) => { if (onLightChange) onLightChange(id, patch); },
+    onTargetMove: (id, patch) => { if (onLightChange) onLightChange(id, patch); },
+    getMetric: () => metricCal,
   });
   targetViz = createTargetViz(api.scene);
+  window.__gizmo3d = gizmoApi.gizmo;   // inspection hook (smoke tests, console)
 
   bindHotkeys({ api, gizmoApi });
 
   canvas.addEventListener('pointerdown', onCanvasClick);
+  canvas.addEventListener('pointermove', onPlacementMove);
+  canvas.addEventListener('contextmenu', onPlacementContext);
   return api;
+}
+
+const placementPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+function placementEngPoint(e) {
+  if (!api) return null;
+  const canvas = e.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, api.getActiveCamera());
+  // Prefer a real point-cloud hit (true depth); fall back to a plane at the
+  // subject's median depth so a point is always produced.
+  let hit = null;
+  if (currentPointCloud) {
+    const pts = raycaster.intersectObject(currentPointCloud.points, false);
+    if (pts.length) hit = pts[0].point;
+  }
+  if (!hit) {
+    if (metricCal) {
+      // Calibrated: fall back to the deck plane (y = 0 in the feet frame).
+      const deck = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const p = new THREE.Vector3();
+      if (!raycaster.ray.intersectPlane(deck, p)) return null;
+      hit = p;
+    } else {
+      const medianEngZ = 1 - getMedianDepth();
+      placementPlane.constant = -lightToWorld([0, 0, medianEngZ])[2];
+      const p = new THREE.Vector3();
+      if (!raycaster.ray.intersectPlane(placementPlane, p)) return null;
+      hit = p;
+    }
+  }
+  if (metricCal) {
+    // The placement controller works in engine space; project the feet-space
+    // hit through the calibration (null when the point has no projection).
+    return worldToEngine(threeToWorldFt([hit.x, hit.y, hit.z]), metricCal.camera, effectiveFit(metricCal));
+  }
+  return worldToLight([hit.x, hit.y, hit.z]);
+}
+
+function onPlacementMove(e) {
+  if (!placement || placement.phase() !== 'awaitingTarget' || !targetViz) {
+    targetViz?.clearPreview();
+    return;
+  }
+  const L = placement.pendingLight();
+  const engPt = placementEngPoint(e);
+  if (!L || !engPt) { targetViz.clearPreview(); return; }
+  targetViz.showPreview(L.position, engPt);
+}
+
+function onPlacementContext(e) {
+  if (!placement || !placement.isActive()) return;
+  e.preventDefault();
+  placement.cancel();
 }
 
 function onCanvasClick(e) {
   if (e.button !== 0) return;                 // left click only
+  if (measureArmed && measureTool) {
+    // Take the click before orbit/gizmo handling: same early-return pattern
+    // as the placement branch just below, which already wins over orbit the
+    // same way. Reuses placementEngPoint's cloud -> deck -> placement-plane
+    // fallback (already a standalone helper here, no extraction needed) --
+    // it returns an ENGINE point when calibrated (Measure requires a
+    // calibration to even arm), so convert to world feet before addPoint:
+    // the tool has no idea which space it's handed, so a skipped conversion
+    // here would produce plausible-looking but silently wrong numbers.
+    e.preventDefault();
+    e.stopPropagation();
+    const engPt = placementEngPoint(e);
+    if (engPt && metricCal) {
+      const world = engineToWorld(engPt, metricCal.camera, effectiveFit(metricCal));
+      measureTool.addPoint(world);
+    }
+    return;
+  }
+  if (placement && placement.isActive()) {
+    const engPt = placementEngPoint(e);
+    if (engPt) placement.acceptSurfacePoint(engPt);
+    return;
+  }
   if (!api || primitives.size === 0) return;
   const canvas = e.currentTarget;
   const rect = canvas.getBoundingClientRect();
@@ -113,10 +241,13 @@ export function syncLightsToScene(lights, selectedId) {
   setSelected(primitives, selectedId);
   prevLights = lights.map((l) => structuredClone(l));
 
-  // Attach gizmo to the selected light — or to its target marker when targeted.
+  // Attach gizmo to the selected light — or to its target marker when
+  // targeted. With no light selected the calibration panel may have asked
+  // for the stage box instead.
   if (gizmoApi) {
     const selectedPrim = selectedId ? primitives.get(selectedId) : null;
     const selectedLight = lights.find((l) => l.id === selectedId);
+    selectedLightId = selectedLight ? selectedLight.id : null;
     if (selectedLight && isTargeted(selectedLight) && targetViz) {
       targetViz.show(selectedLight);
       gizmoApi.attachTarget(targetViz.marker, selectedLight.id);
@@ -124,15 +255,21 @@ export function syncLightsToScene(lights, selectedId) {
       if (targetViz) targetViz.hide();
       if (selectedPrim && selectedLight) {
         gizmoApi.attach(selectedPrim, selectedLight.type);
-      } else {
+      } else if (!applyBoxGizmo()) {
         gizmoApi.detach();
       }
     }
   }
 }
 
-export async function loadScene3D({ assetUrls }) {
+/** Build (or rebuild) the scene for a prepared image. `calibration` switches
+ * the viewport into the feet frame: the cloud is projected through the solved
+ * camera, a deck grid is added, lights read their `_ft` fields, and the home
+ * view frames stage + lights. Overlapping calls are serialized by `loadSeq`:
+ * a superseded load disposes its result instead of adding it. */
+export async function loadScene3D({ assetUrls, calibration = null, units = 'ft' }) {
   if (!api) return;
+  const seq = ++loadSeq;
   // Detach any in-flight gizmo before primitives go away.
   gizmoApi?.detach();
   if (targetViz) targetViz.hide();
@@ -144,15 +281,95 @@ export async function loadScene3D({ assetUrls }) {
   for (const p of primitives.values()) disposeLightPrimitive(p);
   primitives.clear();
   prevLights = [];
+  removeStage(api.scene);
+  removeRigOverlay(api.scene);
+  removeCubes(api.scene);
 
-  if (!assetUrls) return;
-  currentPointCloud = await buildPointCloud({
+  lastAssetUrls = assetUrls || null;
+  metricCal = calibration || null;
+  metricUnits = units || 'ft';
+  raycaster.params.Points.threshold = POINT_HIT_THRESHOLD * metricScale(metricCal);
+  setLightMetric(metricCal, null);
+  targetViz?.setMetric(metricCal);
+
+  if (!assetUrls) { api.resetCamera(null); return; }
+  const cloud = await buildPointCloud({
     originalUrl: assetUrls.original_png_url,
     depthUrl: assetUrls.depth_png_url,
     sourceCanvas2D: document.getElementById('canvas'),
+    calibration: metricCal,
   });
+  if (seq !== loadSeq) { disposePointCloud(cloud); return; }   // superseded
+  currentPointCloud = cloud;
   api.scene.add(currentPointCloud.points);
-  api.resetCamera();
+
+  if (metricCal) {
+    api.scene.add(buildStage(metricCal, metricUnits));
+    updateRigOverlay(api.scene, metricVenue, metricUnits);   // Spec 2: areas + hang positions (replaces any copy added while loading)
+    // Stage-range bounds (the raw cloud reaches the 10 000 ft depth clamp).
+    const bounds = currentPointCloud.bounds.isEmpty()
+      ? new THREE.Box3().setFromObject(currentPointCloud.points)
+      : currentPointCloud.bounds.clone();
+    setLightMetric(metricCal, bounds.clone());
+    // Primitives re-added while the cloud was loading did not know the
+    // bounds yet; refresh them so FOH lights switch to fixture markers.
+    for (const L of prevLights) primitives.get(L.id)?.update(L);
+    api.resetCamera(frameBounds(bounds));
+  } else {
+    api.resetCamera(null);
+  }
+  applyCubes();   // the wireframes (and the box gizmo) come back with the frame
+}
+
+/** Box3 to frame in the home view: the point cloud plus every calibrated
+ * light's feet position (FOH fixtures sit well outside the cloud). */
+function frameBounds(cloudBounds) {
+  const b = cloudBounds.clone();
+  for (const L of prevLights) {
+    if (L.type !== 'reflector' && Array.isArray(L.position_ft)) {
+      b.expandByPoint(new THREE.Vector3(...worldFtToThree(L.position_ft)));
+    }
+  }
+  return b;
+}
+
+/** Calibration changed (or was cleared): rebuild the scene in the new frame.
+ * Skips when `cal` is the record already loaded (applyScene passes it through
+ * loadScene3D itself). Callers re-sync lights afterwards. */
+export async function setCalibration3D(cal, units = metricUnits) {
+  if (!api) return;
+  if ((cal || null) === metricCal && (units || 'ft') === metricUnits) return;
+  if (!lastAssetUrls) { metricCal = cal || null; metricUnits = units || 'ft'; setLightMetric(metricCal, null); return; }
+  await loadScene3D({ assetUrls: lastAssetUrls, calibration: cal, units });
+}
+
+/** Display units for the deck grid (ft | m). */
+export function setUnits3D(units) {
+  metricUnits = units === 'm' ? 'm' : 'ft';
+  if (api && metricCal) {
+    updateStageUnits(api.scene, metricCal, metricUnits);
+    updateRigOverlay(api.scene, metricVenue, metricUnits);
+    applyCubes();
+  }
+}
+
+/** The scene's venue (Spec 2): drives the acting-area cells and hang
+ * position bars. Rebuilt in place when the scene is calibrated; kept for
+ * the next load otherwise. Pass null to remove. */
+export function setVenue3D(venue, units = metricUnits) {
+  metricVenue = venue || null;
+  metricUnits = units === 'm' ? 'm' : 'ft';
+  if (api && metricCal) updateRigOverlay(api.scene, metricVenue, metricUnits);
+  else if (api) removeRigOverlay(api.scene);
+}
+
+/** Re-frame the home view once lights are known (FOH fixtures extend it). */
+export function frameStage3D() {
+  if (!api || !metricCal || !currentPointCloud) return;
+  const b = currentPointCloud.bounds.isEmpty()
+    ? new THREE.Box3().setFromObject(currentPointCloud.points)
+    : currentPointCloud.bounds;
+  api.resetCamera(frameBounds(b));
 }
 
 /** Mirror the live 2D-render canvas into the point cloud's texture.
@@ -171,9 +388,98 @@ export function dispose3D() {
   if (currentPointCloud) disposePointCloud(currentPointCloud);
   for (const p of primitives.values()) disposeLightPrimitive(p);
   primitives.clear();
+  removeStage(api.scene);
+  removeCubes(api.scene);
   api.dispose();
   api = null;
   currentPointCloud = null;
+  metricCal = null;
+  lastAssetUrls = null;
+  cubeOpts = null;
+  boxGizmoHooks = null;
+  boxDragging = false;
+  setLightMetric(null, null);
+  if (window.__scene3d) delete window.__scene3d;
+  if (window.__gizmo3d) delete window.__gizmo3d;
+}
+
+export function isMetric3D() { return isMetric(); }
+
+// ─── Calibration cube: wireframes and the stage-box gizmo ───────────────
+/** Draw (or remove, with null) the stage and house boxes in the feet frame:
+ * { dims, house, shown: {stage, house}, dirty, offset_ft } where offset_ft is
+ * the world delta between the applied and the draft camera (the draft's pose
+ * relative to the frame). Remembered and re-applied after every rebuild.
+ * Nothing is drawn in an uncalibrated (engine-frame) scene. */
+export function setCubes3D(opts) {
+  cubeOpts = opts ? { ...opts } : null;
+  applyCubes();
+}
+
+function applyCubes() {
+  if (!api) return;
+  if (!cubeOpts || !metricCal) {
+    removeCubes(api.scene);
+    applyBoxGizmo();
+    return;
+  }
+  if (boxDragging) {   // the gizmo owns the box mid-drag: restyle only
+    styleCubes(api.scene, { dirty: !!cubeOpts.dirty });
+    return;
+  }
+  updateCubes(api.scene, { ...cubeOpts, offset: worldFtToThree(cubeOpts.offset_ft || [0, 0, 0]) });
+  applyBoxGizmo();
+}
+
+/** Ask for the translate gizmo on the stage box (the calibration panel is
+ * open). `hooks`: { onStart, onDelta([dx, dy, dz] world feet since the press),
+ * onEnd } or just the onDelta function. A selected light always wins; the box
+ * gets the gizmo back when the selection clears. */
+export function attachStageBoxGizmo(hooks) {
+  boxGizmoHooks = typeof hooks === 'function' ? { onDelta: hooks } : (hooks || null);
+  applyBoxGizmo();
+}
+
+export function detachStageBoxGizmo() {
+  boxGizmoHooks = null;
+  boxDragging = false;
+  gizmoApi?.detachObject();
+}
+
+let boxRaf = 0, boxTimer = 0, boxPending = null;
+function flushBoxDelta() {
+  if (boxRaf) { cancelAnimationFrame(boxRaf); boxRaf = 0; }
+  if (boxTimer) { clearTimeout(boxTimer); boxTimer = 0; }
+  const d = boxPending; boxPending = null;
+  if (d && boxGizmoHooks?.onDelta) boxGizmoHooks.onDelta(d);
+}
+
+// Attach the gizmo to the stage box when it is wanted, present and no light
+// holds it; returns whether it is attached. Deltas are throttled to a frame
+// (with a timer fallback for a tab that gets no animation frames) and
+// converted to world feet (dz = −Δz: away from the camera is upstage).
+function applyBoxGizmo() {
+  if (!api || !gizmoApi) return false;
+  const box = api.scene.getObjectByName(STAGE_BOX_NAME);
+  if (!boxGizmoHooks || !box || selectedLightId || !metricCal) {
+    if (!boxDragging) gizmoApi.detachObject();
+    return false;
+  }
+  gizmoApi.attachObject(box, {
+    onStart: () => { boxDragging = true; boxGizmoHooks?.onStart?.(); },
+    onDelta: (d) => {
+      boxPending = threeToWorldFt(d);
+      if (!boxRaf && typeof requestAnimationFrame === 'function') boxRaf = requestAnimationFrame(flushBoxDelta);
+      if (!boxTimer) boxTimer = setTimeout(flushBoxDelta, 50);
+    },
+    onEnd: () => {
+      flushBoxDelta();
+      boxDragging = false;
+      boxGizmoHooks?.onEnd?.();
+      applyCubes();   // rebuild at the draft's offset; the gizmo's own move is discarded
+    },
+  });
+  return true;
 }
 
 export function getApi3D() { return api; }
@@ -185,4 +491,9 @@ export function setGizmoMode(mode) {
 
 export function getGizmoMode() {
   return gizmoApi ? gizmoApi.getMode() : null;
+}
+
+export function notifyPlacementPhase(phase) {
+  if (!targetViz) return;
+  if (phase !== 'awaitingTarget') targetViz.clearPreview();
 }

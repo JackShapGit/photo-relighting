@@ -6,34 +6,146 @@
  *   arrow:   THREE.ArrowHelper | null — direction indicator for non-point lights.
  *   cone:    THREE.Mesh | null — translucent spotlight cone (spotlight only).
  *   outline: THREE.Mesh — selection-ring shown when the light is selected.
+ *   marker:  THREE.Group | null — fixture marker shown instead of the sphere when
+ *            a calibrated light sits outside the point cloud (FOH positions).
  *   update(light): apply a new light state (position, direction, color, ...).
+ *
+ * Calibrated scenes (setLightMetric(cal, bounds)) place lights from
+ * position_ft / direction_ft in the feet Three frame and scale every part by
+ * half the stage width so they stay visible at stage distances.
  */
 import * as THREE from 'three';
-import { directionToWorld, lightToWorld } from './coords.js';
+import { directionToWorld, lightToWorld, worldFtToThree } from './coords.js';
 import { rgbToHex } from './utils.js';
+import { buildFixtureMarker } from './stage.js';
 
 const SPHERE_RADIUS = 0.05;
 const HIT_RADIUS = SPHERE_RADIUS * 3;
 const ARROW_LENGTH = 0.25;
 const CONE_LENGTH = 0.6;
 
+// Metric mode state (set by index.js when a calibration is loaded).
+let metricCal = null;
+let cloudBounds = null;   // THREE.Box3 of the point cloud in the feet frame
+
+export function setLightMetric(cal, bounds = null) {
+  metricCal = cal || null;
+  cloudBounds = cal ? bounds : null;
+}
+export function isLightMetric() { return !!metricCal; }
+
+/** Geometry scale: 1 in engine space, width_ft / 2 in feet space. */
+function metricS() { return metricCal ? Math.max(1, metricCal.width_ft / 2) : 1; }
+
+/** Three-frame position of a light: feet when calibrated and the light has
+ * position_ft, else the engine → world mapping. */
+export function lightPos(light) {
+  if (metricCal && Array.isArray(light.position_ft)) return worldFtToThree(light.position_ft);
+  return lightToWorld(light.position);
+}
+
+/** Three-frame direction of a light. */
+export function lightDir(light) {
+  if (metricCal && Array.isArray(light.direction_ft)) return worldFtToThree(light.direction_ft);
+  return directionToWorld(light.direction);
+}
+
+function outsideCloud(light) {
+  if (!metricCal || !cloudBounds || !Array.isArray(light.position_ft)) return false;
+  const p = new THREE.Vector3(...worldFtToThree(light.position_ft));
+  return !cloudBounds.containsPoint(p);
+}
+
+function coneGeometry(coneAngle, S) {
+  const len = CONE_LENGTH * S;
+  const radius = Math.tan(coneAngle ?? 0.5) * len;
+  const g = new THREE.ConeGeometry(radius, len, 24, 1, true);
+  g.translate(0, -len / 2, 0);
+  return g;
+}
+
+/** Three-frame endpoints of a linear light: feet when calibrated and the bar
+ * has feet endpoints, else the engine → world mapping of the engine pair. */
+export function linearEndpointsThree(light) {
+  if (metricCal && Array.isArray(light.endpoint_a_ft) && Array.isArray(light.endpoint_b_ft)) {
+    return [worldFtToThree(light.endpoint_a_ft), worldFtToThree(light.endpoint_b_ft)];
+  }
+  const a = light.endpoint_a || light.position, b = light.endpoint_b || light.position;
+  return [lightToWorld(a), lightToWorld(b)];
+}
+
+function barGeometry(light, S) {
+  const [a, b] = linearEndpointsThree(light);
+  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+  const len = Math.max(A.distanceTo(B), 1e-3);
+  const radius = Math.max(0.02, 0.15 * S / 20);     // 0.15 ft in feet scenes, thin in engine space
+  const g = new THREE.CylinderGeometry(radius, radius, len, 12, 1);
+  // Cylinder axis is +Y; rotate it onto A→B and centre it on the midpoint,
+  // expressed relative to the group (which sits at the light's position).
+  const dir = B.clone().sub(A).normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  g.applyQuaternion(q);
+  const mid = A.clone().add(B).multiplyScalar(0.5);
+  const origin = new THREE.Vector3(...lightPos(light));
+  g.translate(mid.x - origin.x, mid.y - origin.y, mid.z - origin.z);
+  return g;
+}
+
 export function buildLightPrimitive(light) {
   if (light.type === 'reflector') {
     return buildReflectorPrimitive(light);
   }
+  const S = metricS();
+
+  if (light.type === 'linear') {
+    // Linear (cyc/strip) light: a thin bar between the endpoints; same
+    // group / hit target / outline / marker pattern as the other primitives.
+    const group = new THREE.Group();
+    group.userData.lightId = light.id;
+    group.position.set(...lightPos(light));
+
+    const barMat = new THREE.MeshBasicMaterial({ color: rgbToHex(light.color) });
+    const bar = new THREE.Mesh(barGeometry(light, S), barMat);
+    bar.userData.lightId = light.id;
+    group.add(bar);
+
+    const hitGeo = new THREE.SphereGeometry(HIT_RADIUS * S, 8, 6);
+    const hit = new THREE.Mesh(hitGeo, new THREE.MeshBasicMaterial({ visible: false }));
+    hit.userData.lightId = light.id;
+    hit.userData.isHitTarget = true;
+    group.add(hit);
+
+    const ringGeo = new THREE.TorusGeometry(SPHERE_RADIUS * 1.6 * S, 0.006 * S, 8, 32);
+    const outline = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+    outline.visible = false;
+    group.add(outline);
+
+    let marker = null;
+    if (metricCal) {
+      marker = buildFixtureMarker(Math.max(1, S / 20));
+      marker.userData.lightId = light.id;
+      group.add(marker);
+    }
+
+    // `sphere` is what the rest of the viewport treats as the visible body.
+    const prim = { group, sphere: bar, bar, hit, arrow: null, cone: null, outline, marker, _S: S };
+    prim.update = (next) => update(prim, next);
+    applyMarkerMode(prim, light);
+    return prim;
+  }
 
   const group = new THREE.Group();
   group.userData.lightId = light.id;
-  group.position.set(...lightToWorld(light.position));
+  group.position.set(...lightPos(light));
 
-  const sphereGeo = new THREE.SphereGeometry(SPHERE_RADIUS, 16, 12);
+  const sphereGeo = new THREE.SphereGeometry(SPHERE_RADIUS * S, 16, 12);
   const sphereMat = new THREE.MeshBasicMaterial({ color: rgbToHex(light.color) });
   const sphere = new THREE.Mesh(sphereGeo, sphereMat);
   sphere.userData.lightId = light.id;
   group.add(sphere);
 
   // Invisible larger hit target so small primitives are easy to click.
-  const hitGeo = new THREE.SphereGeometry(HIT_RADIUS, 8, 6);
+  const hitGeo = new THREE.SphereGeometry(HIT_RADIUS * S, 8, 6);
   const hitMat = new THREE.MeshBasicMaterial({ visible: false });
   const hit = new THREE.Mesh(hitGeo, hitMat);
   hit.userData.lightId = light.id;
@@ -43,20 +155,17 @@ export function buildLightPrimitive(light) {
   let arrow = null;
   if (light.type !== 'point') {
     arrow = new THREE.ArrowHelper(
-      new THREE.Vector3(...directionToWorld(light.direction)),
+      new THREE.Vector3(...lightDir(light)),
       new THREE.Vector3(0, 0, 0),
-      ARROW_LENGTH,
+      ARROW_LENGTH * S,
       rgbToHex(light.color),
-      0.06, 0.04,
+      0.06 * S, 0.04 * S,
     );
     group.add(arrow);
   }
 
   let cone = null;
   if (light.type === 'spotlight') {
-    const radius = Math.tan(light.cone_angle ?? 0.5) * CONE_LENGTH;
-    const coneGeo = new THREE.ConeGeometry(radius, CONE_LENGTH, 24, 1, true);
-    coneGeo.translate(0, -CONE_LENGTH / 2, 0);
     const coneMat = new THREE.MeshBasicMaterial({
       color: rgbToHex(light.color),
       transparent: true,
@@ -64,40 +173,63 @@ export function buildLightPrimitive(light) {
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    cone = new THREE.Mesh(coneGeo, coneMat);
-    orientToDirection(cone, directionToWorld(light.direction));
+    cone = new THREE.Mesh(coneGeometry(light.cone_angle, S), coneMat);
+    orientToDirection(cone, lightDir(light));
     group.add(cone);
   }
 
   // Outline ring shown when selected. Hidden by default.
-  const ringGeo = new THREE.TorusGeometry(SPHERE_RADIUS * 1.6, 0.006, 8, 32);
+  const ringGeo = new THREE.TorusGeometry(SPHERE_RADIUS * 1.6 * S, 0.006 * S, 8, 32);
   const ringMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
   const outline = new THREE.Mesh(ringGeo, ringMat);
   outline.visible = false;
   group.add(outline);
 
-  const prim = { group, sphere, hit, arrow, cone, outline };
+  // Fixture marker for calibrated lights outside the point cloud (FOH).
+  let marker = null;
+  if (metricCal) {
+    marker = buildFixtureMarker(Math.max(1, S / 20));
+    marker.userData.lightId = light.id;
+    group.add(marker);
+  }
+
+  const prim = { group, sphere, hit, arrow, cone, outline, marker, _S: S };
   prim.update = (next) => update(prim, next);
+  applyMarkerMode(prim, light);
   return prim;
 }
 
+function applyMarkerMode(prim, light) {
+  if (!prim.marker) return;
+  const fixture = outsideCloud(light);
+  prim.marker.visible = fixture;
+  prim.sphere.visible = !fixture;
+  if (fixture) {
+    const dir = new THREE.Vector3(...lightDir(light)).normalize();
+    prim.marker.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+  }
+}
+
 function update(prim, light) {
-  prim.group.position.set(...lightToWorld(light.position));
+  prim.group.position.set(...lightPos(light));
   prim.sphere.material.color.set(rgbToHex(light.color));
+  if (prim.bar) {
+    // Endpoints may have moved: rebuild the bar relative to the new origin.
+    prim.bar.geometry.dispose();
+    prim.bar.geometry = barGeometry(light, prim._S);
+  }
   if (prim.arrow) {
-    prim.arrow.setDirection(new THREE.Vector3(...directionToWorld(light.direction)));
+    prim.arrow.setDirection(new THREE.Vector3(...lightDir(light)));
     prim.arrow.setColor(new THREE.Color(rgbToHex(light.color)));
   }
   if (prim.cone) {
-    const newRadius = Math.tan(light.cone_angle ?? 0.5) * CONE_LENGTH;
     // Rebuild cone geometry on cone-angle change.
     prim.cone.geometry.dispose();
-    const g = new THREE.ConeGeometry(newRadius, CONE_LENGTH, 24, 1, true);
-    g.translate(0, -CONE_LENGTH / 2, 0);
-    prim.cone.geometry = g;
+    prim.cone.geometry = coneGeometry(light.cone_angle, prim._S);
     prim.cone.material.color.set(rgbToHex(light.color));
-    orientToDirection(prim.cone, directionToWorld(light.direction));
+    orientToDirection(prim.cone, lightDir(light));
   }
+  applyMarkerMode(prim, light);
 }
 
 function buildReflectorPrimitive(light) {
@@ -148,7 +280,7 @@ function buildReflectorPrimitive(light) {
   group.add(outline);
 
   const prim = {
-    group, sphere: plane, hit, arrow: null, cone: null, outline,
+    group, sphere: plane, hit, arrow: null, cone: null, outline, marker: null,
     _planeBack: planeBack,
   };
   prim.update = (next) => updateReflector(prim, next);
@@ -202,6 +334,9 @@ export function disposeLightPrimitive(prim) {
   }
   prim.outline.geometry.dispose();
   prim.outline.material.dispose();
+  if (prim.marker) {
+    prim.marker.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+  }
   if (prim._planeBack) {
     prim._planeBack.geometry.dispose();
     prim._planeBack.material.dispose();

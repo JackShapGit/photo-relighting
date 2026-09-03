@@ -135,18 +135,149 @@ button:hover { background: var(--bg-hover); }
 }
 
 /* ─── Main 3-pane layout ──────────────────────────────────────── */
+/* Flex row: the left pane's width is a px value pane-divider.js writes to
+ * #tree-pane (per tab, draggable via #pane-divider); the stage takes the
+ * rest; the props pane keeps its fixed width. */
 main {
-  display: grid;
-  grid-template-columns: 240px 1fr 320px;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
   height: calc(100% - 44px);
 }
 #tree-pane,
 #props-pane {
   background: var(--bg-elevated);
   overflow-y: auto;
+  box-sizing: border-box;
 }
-#tree-pane { border-right: 1px solid var(--border); }
-#props-pane { border-left: 1px solid var(--border); padding: 12px; }
+#tree-pane { flex: 0 0 auto; width: 260px; min-width: 220px; border-right: 1px solid var(--border); }
+#props-pane { flex: 0 0 320px; border-left: 1px solid var(--border); padding: 12px; }
+#stage { flex: 1 1 auto; min-width: 0; }
+
+/* Divider between the left pane and the stage (same look as .stage-divider). */
+.pane-divider {
+  flex: 0 0 6px;
+  background: var(--border, #333);
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+}
+.pane-divider:hover,
+.pane-divider.is-active { background: var(--accent, #4a7); }
+
+/* Lights | Rig tab strip in the pane header (same look as .view-mode). */
+.pane-tabs {
+  display: inline-flex;
+  border: 1px solid var(--input-border, #444);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pane-tabs button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-primary, #ddd);
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pane-tabs button + button { border-left: 1px solid var(--input-border, #444); }
+.pane-tabs button:hover { background: var(--bg-hover); }
+.pane-tabs button[aria-pressed="true"] {
+  background: var(--accent, #4a7);
+  color: #fff;
+}
+.pane-tabs button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pane-tabs button[aria-disabled="true"]:hover { background: transparent; }
+#rig-root[hidden], #tree-root[hidden] { display: none; }
+
+/* ─── Rig tab (Spec 2): positions and fixtures tables ─────────────── */
+#rig-root { padding: 6px 6px 12px; font-size: 12px; }
+.rig-status {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 4px 2px 8px; color: var(--text-muted); font-size: 12px;
+}
+.rig-status-count { color: var(--text-primary); }
+.rig-msg { color: var(--warn, #e0a030); margin-left: 6px; }
+.rig-heading {
+  margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted);
+}
+.rig-table-wrap { overflow-x: auto; max-width: 100%; }
+.rig-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.rig-table th, .rig-table td { padding: 2px 4px; text-align: left; white-space: nowrap; vertical-align: middle; }
+.rig-table thead th {
+  position: sticky; top: 0; background: var(--bg-elevated); color: var(--text-muted);
+  font-weight: normal; font-size: 11px; border-bottom: 1px solid var(--border); z-index: 1;
+}
+.rig-table tbody tr { height: 24px; border-bottom: 1px solid transparent; }
+.rig-table tbody tr:hover { background: var(--bg-hover); }
+.rig-table tr.rig-group th {
+  padding-top: 6px; color: var(--text-muted); font-weight: normal; font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+.rig-table tr.rig-fixture { cursor: pointer; border-left: 2px solid transparent; }
+.rig-table tr.rig-fixture.selected { background: var(--bg-selected); border-left-color: var(--accent); }
+.rig-table tr.rig-fixture.disabled td:first-child { opacity: 0.55; }
+.rig-table input, .rig-table select {
+  background: transparent; border: 1px solid transparent; border-radius: 3px;
+  color: var(--text-primary); font-size: 12px; padding: 1px 3px; margin: 0;
+}
+.rig-table input.rig-num { width: 56px; text-align: right; }
+.rig-table input.rig-text { width: 72px; }
+.rig-table input[type="number"] { width: 52px; }
+.rig-table select { max-width: 110px; }
+.rig-table select.rig-ref { max-width: 92px; }
+.rig-ref-hint { font-size: 10px; color: var(--text-muted); margin-left: 4px; white-space: nowrap; }
+.rig-table input:hover, .rig-table select:hover { border-color: var(--input-border, #444); }
+.rig-table input:focus, .rig-table select:focus { border-color: var(--accent, #4a7); outline: none; background: var(--bg); }
+.rig-table input.is-invalid { border-color: var(--danger, #c44); }
+.rig-muted { color: var(--text-muted); }
+.rig-readout { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rig-count { text-align: center; color: var(--text-muted); }
+.rig-actions { display: inline-flex; gap: 2px; }
+.rig-btn {
+  font-size: 11px; padding: 1px 6px; background: transparent; border: 1px solid var(--input-border);
+  border-radius: 3px; color: var(--text-muted); cursor: pointer;
+}
+.rig-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.rig-toolbar { display: flex; gap: 6px; padding: 4px 0 2px; }
+.rig-load { display: flex; gap: 6px; align-items: center; padding: 4px 0; color: var(--text-muted); }
+
+/* Venue editor modal (Spec 2). */
+.venue-editor { width: 720px; gap: 10px; }
+.venue-editor .modal-row > input[type="text"] { flex: 1; }
+.venue-dims { display: flex; gap: 12px; flex-wrap: wrap; }
+.venue-dims label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-muted); flex: 1; min-width: 120px; }
+.venue-dims input { width: 100%; box-sizing: border-box; }
+.venue-note { margin: 0; font-size: 12px; color: var(--text-muted); }
+.venue-editor .checkbox-row { font-size: 13px; }
+.venue-editor .rig-table-wrap { max-height: 40vh; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; }
+.venue-dup { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.venue-dup input { flex: 1; }
+.venue-editor .modal-actions .modal-spacer { flex: 1; }
+.venue-primary { background: var(--accent); color: var(--accent-text, #fff); border-color: var(--accent); }
+.venue-danger { color: var(--danger, #c66); }
+#calibrate-btn.is-venue-missing { color: var(--warn, #e0a030); }
+.cal-note { font-size: 11px; color: var(--text-muted); margin: 2px 0 6px; }
+
+/* Props pane: cap / validation message under the light controls. */
+.props-msg { color: var(--warn, #e0a030); font-size: 12px; margin: 4px 0; }
+.props-msg[hidden] { display: none; }
+
+/* Props pane: the compact Rig fieldset above the light controls. */
+.rig-props { border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px 6px; margin: 0 0 8px; }
+.rig-props legend { font-size: 11px; color: var(--text-muted); padding: 0 4px; }
+.rig-props label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; margin: 3px 0; }
+.rig-props select, .rig-props input { width: 120px; }
+.rig-props .rig-option-row[hidden] { display: none; }
+.readout-block { margin: 8px 0; padding: 6px 8px; border-radius: 4px;
+                 background: var(--bg-hover); border: 1px solid var(--border); }
+.readout-row { display: flex; justify-content: space-between; gap: 12px; line-height: 1.6; }
+.readout-key { opacity: .75; }
+.readout-val { font-variant-numeric: tabular-nums; }
 .pane-header {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
@@ -818,20 +949,37 @@ button.refine-toggle.active {
 
 /* ─── 3D viewport split ─────────────────────────────────────────────────── */
 
+/* --split is the 2D pane's share of the usable width (stage minus the
+ * divider); split-view.js writes it. Both panes get an explicit basis so
+ * 0.5 is exactly half and half regardless of #canvas-wrap's JS-set width. */
 #stage {
+  --split: 0.5;
+  --divider-w: 6px;
   display: flex;
   flex-direction: row;
   align-items: stretch;
   overflow: hidden;
 }
 
+#stage2d-wrap {
+  flex: 0 0 calc((100% - var(--divider-w)) * var(--split));
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* canvas-wrap gets an explicit px size from fitCanvasWrap; never let flex
+ * stretch it or the image squashes. */
 #canvas-wrap {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
 }
 
 #stage3d-wrap {
-  flex: 1 1 auto;
+  flex: 0 0 calc((100% - var(--divider-w)) * (1 - var(--split)));
   min-width: 0;
   position: relative;
   background: #0b0b0b;
@@ -839,12 +987,27 @@ button.refine-toggle.active {
 
 #stage3d-wrap[hidden] { display: none !important; }
 
-/* When the 3D pane is hidden, center the photo canvas in #stage and let
- * its explicit width (set by fitCanvasWrap to preserve aspect ratio)
- * win over flex-grow. Without this, canvas-wrap stretches to fill the
- * full stage width and the image gets squashed horizontally. */
-#stage.stage--3d-hidden { justify-content: center; }
-#stage.stage--3d-hidden #canvas-wrap { flex: 0 0 auto; }
+/* 2D mode: the photo pane takes the whole stage. */
+#stage.stage--mode-2d #stage2d-wrap { flex-basis: 100%; }
+
+/* 3D mode: the 3D pane takes the whole stage. The 2D pane stays laid out
+ * (full stage size) but invisible instead of display:none, because
+ * renderer.draw() sizes the WebGL canvas from clientWidth/clientHeight and
+ * the 3D point cloud mirrors that canvas into its texture. A display:none
+ * pane would zero the canvas and freeze the cloud's colors. */
+#stage.stage--mode-3d #stage3d-wrap { flex-basis: 100%; }
+#stage.stage--mode-3d #stage2d-wrap {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* While dragging the divider, keep the cursor/selection stable and stop the
+ * 3D canvas (OrbitControls) from grabbing pointer events. */
+body.is-resizing-split { cursor: col-resize; user-select: none; }
+body.is-resizing-split #stage2d-wrap,
+body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 
 #canvas3d {
   width: 100%;
@@ -853,12 +1016,14 @@ button.refine-toggle.active {
 }
 
 .stage-divider {
-  flex: 0 0 6px;
+  flex: 0 0 var(--divider-w, 6px);
   background: var(--border, #333);
   cursor: col-resize;
   user-select: none;
+  touch-action: none;
 }
-.stage-divider:hover { background: var(--accent, #4a7); }
+.stage-divider:hover,
+.stage-divider.is-active { background: var(--accent, #4a7); }
 
 .stage3d-overlay {
   position: absolute;
@@ -894,6 +1059,87 @@ button.refine-toggle.active {
 
 .stage-divider[hidden] { display: none !important; }
 
+/* Header segmented control: 2D | Split | 3D (mirrors .polish-toggle). */
+.view-mode {
+  display: inline-flex;
+  border: 1px solid var(--input-border, #444);
+  border-radius: 4px;
+  overflow: hidden;
+  /* Task 9 / ruling T9-A: overflow:hidden drops this item's flexbox auto
+     min-width to 0, so it (and #unit-toggle, same class) was the element
+     that collapsed to nothing when the header overflowed its 1600px
+     viewport in rig mode with a long calibrate badge -- an unclickable
+     segmented control, not a cosmetic squeeze. Never shrink it. */
+  flex-shrink: 0;
+}
+.view-mode button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-primary, #ddd);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.view-mode button + button { border-left: 1px solid var(--input-border, #444); }
+.view-mode button:hover { background: var(--bg-hover); }
+.view-mode button[aria-pressed="true"] {
+  background: var(--accent, #4a7);
+  color: #fff;
+}
+
+/* ─── Areas overlay (Spec 2): acting-area cells projected on the photo ── */
+#areas-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;      /* never intercepts the light handles above it */
+  z-index: 1;
+  overflow: visible;
+}
+#areas-overlay[hidden] { display: none; }
+#areas-overlay .area-cell {
+  fill: rgba(92, 208, 255, 0.08);
+  stroke: rgba(92, 208, 255, 0.9);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+#areas-overlay .area-label {
+  fill: #cfefff;
+  font: 600 13px system-ui, sans-serif;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.75);
+  stroke-width: 3px;
+}
+
+/* ─── Placement overlay (click-to-place lights) ────────────────────────── */
+#placement-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;                 /* above handles while placing */
+  cursor: crosshair;
+}
+#placement-overlay[hidden] { display: none; }
+#placement-overlay .placement-tether {
+  position: absolute;
+  height: 0;
+  border-top: 1px dashed #ffd23f;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+/* ─── Ruler (Spec 3): 2D photo-pane measurement overlay ────────────────── */
+#measure-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+#measure-capture { position: absolute; inset: 0; cursor: crosshair; z-index: 5; }
+.measure-line { stroke: #ffd166; stroke-width: 1.5; }
+.measure-line.is-pending { stroke-dasharray: 4 3; opacity: .8; }
+.measure-label { fill: #ffd166; font: 11px system-ui, sans-serif; text-anchor: middle;
+                 paint-order: stroke; stroke: rgba(0,0,0,.65); stroke-width: 3px; }
+.measure-toggle[aria-pressed="true"] { outline: 2px solid #ffd166; }
+
 /* ─── Reflector anchor ─────────────────────────────────────────────────── */
 
 .handle.handle--reflector {
@@ -902,4 +1148,206 @@ button.refine-toggle.active {
   border-radius: 3px;
   outline: 1px solid rgba(106, 207, 255, 0.4);
   outline-offset: 2px;
+}
+
+/* ─── Edge arrows (calibrated lights outside the photo) ─────────────────── */
+/* Positioned by handles.js at 2% inside the nearest photo edge; the glyph is
+ * rotated toward the light and the name label sits on the photo-centre side. */
+.edge-arrow {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+  color: var(--accent, #4a7);
+  line-height: 1;
+  z-index: 3;
+}
+.edge-arrow__glyph {
+  display: block;
+  font-size: 18px;
+  text-shadow: 0 0 3px #000, 0 0 1px #000;
+}
+.edge-arrow__label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  font-size: 11px;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 0 3px #000, 0 0 2px #000;
+  pointer-events: none;
+}
+.edge-arrow.is-selected { color: #fff; }
+.edge-arrow.is-selected .edge-arrow__glyph { filter: drop-shadow(0 0 4px var(--accent, #4a7)); }
+
+/* ─── Units toggle + calibrate badge (header) ───────────────────────────── */
+/* #unit-toggle reuses .view-mode. The Calibrate button doubles as the badge
+ * once a calibration is applied ("40 × 20 × 30 ft"). */
+.calib-badge {
+  font-size: 12px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  /* Task 9 / ruling T9-A: the badge is the only header element carrying
+     unbounded user-supplied content (scene/venue name), so it's the right
+     thing to absorb header overflow now that .view-mode/#unit-toggle no
+     longer will. min-width:0 lets it shrink past its content size in the
+     flex row; text-overflow:ellipsis degrades it legibly instead of
+     letting it silently vanish. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.calib-badge.is-calibrated {
+  border-color: var(--accent, #4a7);
+  color: var(--accent, #4a7);
+}
+/* Calibrated without a usable depth fit: upstage distances are a linear estimate. */
+.calib-badge.is-calibrated.is-no-fit {
+  border-color: #fc6;
+  color: #fc6;
+}
+/* Calibration cube: unapplied draft changes (drag or typed) show as a dot. */
+.calib-badge.is-dirty::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #fc6;
+  vertical-align: middle;
+}
+
+/* ─── Metric position fields in the props pane ─────────────────────────── */
+.metric-pos, .metric-tgt {
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 6px 0;
+}
+.metric-pos legend, .metric-tgt legend { font-size: 11px; color: var(--text-muted); padding: 0 4px; }
+.metric-pos label, .metric-tgt label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; margin: 3px 0; }
+.metric-pos input, .metric-tgt input { width: 84px; }
+
+/* ─── Stage calibration panel (calibration cube) ──────────────────────── */
+/* The panel lives inside #canvas-wrap next to the cube overlay. */
+#calib-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  background: rgba(0, 0, 0, 0.8);
+  color: #ddd;
+  padding: 10px;
+  border-radius: 6px;
+  width: 260px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#calib-panel[hidden] { display: none !important; }
+#calib-panel h3 { margin: 0 0 4px; font-size: 13px; }
+#calib-panel .cal-help { margin: 0 0 4px; color: var(--text-muted); }
+#calib-panel .cal-camera { font-size: 11px; color: var(--text-muted); }
+#calib-panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#calib-panel input[type="number"] { width: 90px; }
+#calib-panel select { max-width: 110px; }
+#calib-panel .cal-units { align-self: flex-start; }
+#calib-panel .cal-warn { color: #fc6; }
+#calib-panel .cal-house {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+#calib-panel .cal-house[hidden] { display: none !important; }
+#calib-panel .cal-house-title { font-weight: 600; color: #ffdca8; }
+#calib-panel .cal-house-note { font-size: 11px; color: var(--text-muted); }
+#calib-panel .cal-house-msg { font-size: 11px; color: #f88; }
+@keyframes cal-reject { 0%, 100% { box-shadow: none; } 30% { box-shadow: 0 0 0 2px #f66; } }
+#calib-panel input.is-rejected { animation: cal-reject 0.6s ease-out; }
+#calib-panel .cal-dirty { color: #fc6; font-weight: 600; }
+#calib-panel .cal-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+#calib-panel button { font-size: 12px; }
+/* Unapplied changes: Apply pulses until the draft is committed or reverted. */
+@keyframes cal-apply-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 204, 102, 0.75); }
+  60% { box-shadow: 0 0 0 7px rgba(255, 204, 102, 0); }
+}
+#calib-panel .cal-apply.is-dirty {
+  border-color: #fc6;
+  color: #fc6;
+  animation: cal-apply-pulse 1.4s ease-out infinite;
+}
+
+/* ─── Cube overlay: the stage box (and, later, the house box) on the photo ─ */
+/* The SVG never takes pointer events; only its handles and labels do, so the
+ * light handles above keep working. Sits over the areas overlay. */
+#cube-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  overflow: visible;
+}
+#cube-overlay[hidden], #cube-overlay [hidden] { display: none; }
+#cube-overlay .cube-edge {
+  fill: none;
+  stroke: var(--accent, #4a7);
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+#cube-overlay .cube-edge.is-back { stroke-opacity: 0.55; }
+#cube-overlay .cube-edge.is-side { stroke-opacity: 0.75; }
+#cube-overlay .cube-edge.is-dirty { stroke-dasharray: 6 4; }
+#cube-overlay .cube-handle {
+  fill: var(--accent, #4a7);
+  stroke: #fff;
+  stroke-width: 2;
+  pointer-events: all;
+  cursor: grab;
+  touch-action: none;
+}
+#cube-overlay .cube-handle.is-dragging { cursor: grabbing; }
+#cube-overlay .cube-handle.is-clamped { fill: #f66; }
+#cube-overlay .cube-stage .cube-handle.is-offscreen { fill: rgba(74, 158, 255, 0.25); stroke-dasharray: 2 2; }
+#cube-overlay .cube-label {
+  fill: #fff;
+  font: 600 12px system-ui, sans-serif;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.85);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  dominant-baseline: middle;
+  pointer-events: all;
+  cursor: text;
+}
+/* House box: the room's cross-section in a second accent, faint guide lines
+ * toward the camera, bar handles on the walls (drag X) and floor/ceiling
+ * (drag Y). A handle for an edge beyond the photo sits at the image edge,
+ * hollow, so the wall can still be grabbed. */
+#cube-overlay { --house-color: #f0a030; }
+#cube-overlay .cube-house .cube-edge { stroke: var(--house-color); }
+#cube-overlay .cube-guide {
+  fill: none;
+  stroke: var(--house-color);
+  stroke-opacity: 0.35;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+#cube-overlay .cube-guide.is-dirty { stroke-dasharray: 4 4; }
+#cube-overlay .cube-house .cube-handle { fill: var(--house-color); }
+#cube-overlay .cube-house-handle.is-offscreen { fill: rgba(240, 160, 48, 0.25); stroke-dasharray: 2 2; }
+#cube-overlay .cube-house .cube-label { fill: #ffdca8; }
+/* In-place edit of an edge label: an input placed over the label. */
+.cube-label-input {
+  position: absolute;
+  z-index: 7;
+  width: 64px;
+  font-size: 12px;
+  transform: translate(-50%, -50%);
 }

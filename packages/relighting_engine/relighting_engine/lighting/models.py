@@ -41,7 +41,7 @@ class Gobo:
 
 @dataclass
 class Light:
-    type: Literal['directional', 'point', 'spotlight', 'reflector']
+    type: Literal['directional', 'point', 'spotlight', 'reflector', 'linear']
     position: tuple[float, float, float] = (0.0, 0.0, -1.0)
     direction: tuple[float, float, float] = (0.0, 0.0, 1.0)
     target: tuple[float, float, float] | None = None
@@ -57,6 +57,19 @@ class Light:
     enabled: bool = True
     name: str = ""
 
+    # Metric (calibrated) fields — feet in the world frame. None when uncalibrated.
+    position_ft: tuple[float, float, float] | None = None
+    target_ft: tuple[float, float, float] | None = None
+    direction_ft: tuple[float, float, float] | None = None
+
+    # Linear (cyc/strip) lights: the bar's endpoints. Feet in the world frame
+    # when calibrated; the engine-space pair doubles as the shadow proxies
+    # (derived by the client when calibrated, authoritative otherwise).
+    endpoint_a_ft: tuple[float, float, float] | None = None
+    endpoint_b_ft: tuple[float, float, float] | None = None
+    endpoint_a: tuple[float, float, float] | None = None
+    endpoint_b: tuple[float, float, float] | None = None
+
     # Reflector-only fields (ignored for non-reflector types).
     normal: tuple[float, float, float] = (0.0, 0.0, -1.0)
     size: tuple[float, float] = (0.6, 0.4)
@@ -64,8 +77,13 @@ class Light:
     roughness: float = 0.5
 
     def validate(self) -> None:
-        if self.type not in ("directional", "point", "spotlight", "reflector"):
+        if self.type not in ("directional", "point", "spotlight", "reflector", "linear"):
             raise ValueError(f"unknown light type {self.type}")
+        if self.type == "linear":
+            has_ft = self.endpoint_a_ft is not None and self.endpoint_b_ft is not None
+            has_eng = self.endpoint_a is not None and self.endpoint_b is not None
+            if not (has_ft or has_eng):
+                raise ValueError("linear light needs endpoint_a/endpoint_b (feet or engine)")
         if not isfinite(self.intensity) or self.intensity < 0:
             raise ValueError("intensity must be non-negative finite")
         if self.type in ("directional", "spotlight"):

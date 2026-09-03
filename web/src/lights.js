@@ -77,11 +77,12 @@ export function defaultLight(slot) {
   };
 }
 
-export function newLightNode({ name = 'Light', type = 'directional' } = {}) {
+export function newLightNode({ name = 'Light', type = 'directional', fixture = null } = {}) {
   const L = defaultLight('fill');         // sensible fill-style defaults
   L.id = newId();
   L.name = name;
   L.type = type;
+  if (fixture) L.fixture = { ...fixture };   // Spec 2 rig fixture block (see rig/fixture-sync.js)
   return L;
 }
 
@@ -249,6 +250,9 @@ export function newState() {
     subjectMedianDepth: 0.3,              // populated from prepare metadata
     selectedId: key.id,                   // Key still selected first
     theme: 'dark',
+    calibration: null,                    // stage calibration record (+ solved camera) or null
+    calibration_undo: null,               // latest calibration history entry (one Undo survives a reload)
+    units: 'ft',                          // display units for feet values: 'ft' | 'm'
   };
   syncLights(state);
   return state;
