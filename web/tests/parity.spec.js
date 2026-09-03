@@ -26,7 +26,7 @@ const mark = (label) => console.log(`[parity +${((Date.now() - t0) / 1000).toFix
 // the scene id to change) and size the viewport for a pixel-exact capture.
 async function uploadFixture(page) {
   // The Rig tab opens by itself once a scene is calibrated (Spec 2) and its
-  // pane defaults to 580 px, which would shrink the stage after the viewport
+  // pane defaults to 670 px, which would shrink the stage after the viewport
   // has been sized below; pin the Rig pane to the Lights width so the canvas
   // stays imgW × imgH through the calibrated tests.
   await page.addInitScript(() => {

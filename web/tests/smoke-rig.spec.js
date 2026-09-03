@@ -25,7 +25,7 @@ test('rig tab: venue positions, add fixture, 3D overlay, 64-light cap', async ({
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
 
-  // Room for the 580 px Rig pane, the stage, and the props pane.
+  // Room for the 670 px Rig pane, the stage, and the props pane.
   await page.setViewportSize({ width: 1600, height: 900 });
   await createSceneFromFixture(page, { name: 'smoke-rig', viewMode: 'split' });
   const sceneId = await page.evaluate(() => window.__state.sceneId);

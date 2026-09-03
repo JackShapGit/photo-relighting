@@ -132,6 +132,7 @@ test('readoutCellText: an aimed fixture formats throw and diameter in the displa
   assert.equal(readoutCellText(L, V, 'ft', 'throw').text, '20.0');
   assert.equal(readoutCellText(L, V, 'ft', 'throw').title, '');
   assert.equal(readoutCellText(L, V, 'm', 'throw').text, '6.1');
+  assert.equal(readoutCellText(L, V, 'ft', 'dia').text, '8.1');
 });
 
 test('readoutCellText: a cyc shows an em dash and the reason tooltip', () => {

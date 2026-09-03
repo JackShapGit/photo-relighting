@@ -273,6 +273,10 @@ main {
 .rig-props label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; margin: 3px 0; }
 .rig-props select, .rig-props input { width: 120px; }
 .rig-props .rig-option-row[hidden] { display: none; }
+.readout-block { margin: 8px 0; padding: 6px 8px; border-radius: 4px; background: var(--panel-2, rgba(127,127,127,.08)); }
+.readout-row { display: flex; justify-content: space-between; gap: 12px; line-height: 1.6; }
+.readout-key { opacity: .75; }
+.readout-val { font-variant-numeric: tabular-nums; }
 .pane-header {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);

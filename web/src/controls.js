@@ -11,6 +11,7 @@ import { PRESETS } from './presets.js';
 import { isTargeted, targetSpawnPoint, applyTargeting } from './targeting.js';
 import { toDisplay, parseLength } from './metric/units.js';
 import { syncLightFromFeet } from './metric/light-metric.js';
+import { readoutCellText } from './metric/measure.js';
 import { FIXTURE_TYPES, PRESETS as FIXTURE_PRESETS } from './rig/presets.js';
 import { detachFixture, detachAim, findPosition, setLightType, tryEnable } from './rig/fixture-sync.js';
 import { areaLabels } from './rig/geometry.js';
@@ -309,6 +310,18 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
     <div class="props-msg" hidden></div>
   `;
 
+  // Spec 3: throw and field diameter for the selected fixture. Values are
+  // written by updateReadoutBlock so a drag can refresh them without
+  // re-rendering the whole props pane.
+  const readout = document.createElement('div');
+  readout.className = 'readout-block';
+  readout.innerHTML = `
+    <div class="readout-row"><span class="readout-key">Throw</span><span class="readout-val" data-readout="throw">—</span></div>
+    <div class="readout-row"><span class="readout-key">Field Ø</span><span class="readout-val" data-readout="dia">—</span></div>
+  `;
+  container.appendChild(readout);
+  updateReadoutBlock(container, L, state.venue, state.units || 'ft');
+
   const $ = (sel) => container.querySelector(sel);
 
   if (rig) {
@@ -470,6 +483,24 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
       L.gobo = null;
     }
   });
+}
+
+/**
+ * Refresh the props-pane readout values in place. Safe to call on every
+ * redraw: it writes only when the text actually changed, and no-ops when the
+ * pane is not showing a light.
+ */
+export function updateReadoutBlock(container, light, venue, units = 'ft') {
+  if (!container || !light) return;
+  const block = container.querySelector('.readout-block');
+  if (!block) return;
+  for (const kind of ['throw', 'dia']) {
+    const el = block.querySelector(`[data-readout="${kind}"]`);
+    if (!el) continue;
+    const { text, title } = readoutCellText(light, venue, units, kind);
+    if (el.textContent !== text) el.textContent = text;
+    if (el.title !== title) el.title = title;
+  }
 }
 
 function renderReflectorProps(L, slotIdx, container, redraw) {
