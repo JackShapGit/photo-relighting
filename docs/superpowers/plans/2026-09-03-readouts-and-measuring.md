@@ -627,16 +627,30 @@ async function calibratedRigScene(page, name) {
 }
 
 /** Add a fixture on the first hang position (FOH). Same click path as smoke-rig.spec.js:75. */
-async function addFixtureOnFOH(page) {
-  await page.locator('#rig-root .rig-positions tbody tr').first()
+async function addHungFixture(page) {
+  // Uses the venue's SECOND hang position ("1E", onstage), not FOH: FOH
+  // projects outside this test's photographed frame (position_eng Y ~= -0.67),
+  // so handles.js treats its 2D handle as off-frame and renders an edge arrow
+  // instead, leaving boundingBox() null. Returns the new fixture's id so the
+  // drag and the asserted cell refer to the SAME light — handles build in
+  // state.lights order while the table renders position groups before Custom,
+  // so a .first() on each side would select different lights.
+  const rowsBefore = await page.locator('#rig-root .rig-fixtures tr.rig-fixture').count();
+  await page.locator('#rig-root .rig-positions tbody tr').nth(1)
     .locator('.rig-actions .rig-btn').first().click();
-  await expect(page.locator('#rig-root .rig-fixtures tr.rig-fixture')).toHaveCount(1);
+  await expect(page.locator('#rig-root .rig-fixtures tr.rig-fixture')).toHaveCount(rowsBefore + 1);
+  const id = await page.evaluate(() => window.__state.selectedId);
+  // Deliberately NOT aimed: this assertion is the end-to-end proof of ruling
+  // T4-B (a hung fixture gets a default aim at stage centre). Aiming it here
+  // would hide a regression in that default.
+  await expect(page.locator(`#rig-root tr[data-id="${id}"] [data-readout="throw"]`)).not.toHaveText('—');
+  return id;
 }
 
 test('readouts: columns populate, and a real-mouse drag moves the throw live', async ({ page }) => {
   test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
   const { errors } = await calibratedRigScene(page, 'smoke-measure-readouts');
-  await addFixtureOnFOH(page);
+  await addHungFixture(page);
 
   const throwCell = page.locator('#rig-root tr.rig-fixture [data-readout="throw"]').first();
   await expect(throwCell).not.toHaveText('—');
@@ -1611,7 +1625,7 @@ Extend `web/tests/smoke-measure.spec.js`:
 test('units: switching to metres converts the readout columns and the ruler label', async ({ page }) => {
   test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
   const { errors } = await calibratedRigScene(page, 'smoke-measure-units');
-  await addFixtureOnFOH(page);
+  await addHungFixture(page);
 
   await page.locator('#measure-btn').click();
   const wrap = await page.locator('#canvas-wrap').boundingBox();
