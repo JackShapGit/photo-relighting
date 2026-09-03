@@ -254,15 +254,52 @@ test('measurements clear when the calibration changes or the scene switches', as
   await page.locator('#measure-btn').click();
   const wrap = await page.locator('#canvas-wrap').boundingBox();
   const at = (fx, fy) => [wrap.x + wrap.width * fx, wrap.y + wrap.height * fy];
-  await page.mouse.move(...at(0.5, 0.5));
-  await page.mouse.click(...at(0.30, 0.62));
-  await page.mouse.click(...at(0.70, 0.62));
+  const takeOne = async () => {
+    await page.mouse.move(...at(0.5, 0.5));
+    await page.mouse.click(...at(0.30, 0.62));
+    await page.mouse.click(...at(0.70, 0.62));
+  };
+
+  await takeOne();
   await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(1);
 
-  // A re-apply of the calibration drops them.
+  // applyCalibration site: a re-apply of the calibration drops them.
   await page.evaluate(() => window.__applyCalibration());
   await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(0);
   await expect(page.locator('#measure-overlay .measure-label')).toHaveCount(0);
+
+  // adoptVenue site: a venue dims edit re-solves the camera, so it drops
+  // them too. Real UI, not window.__state: window.__openVenueEditor is the
+  // same console/spec hook main.js already exposes for this modal.
+  await takeOne();
+  await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(1);
+  await page.evaluate(() => { window.__openVenueEditor(); });
+  await expect(page.locator('.venue-editor')).toBeVisible();
+  await page.fill('#ve-width', '41');
+  await page.click('#ve-save');
+  await expect(page.locator('.venue-editor')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(0);
+
+  // applyScene site: switching to a different scene in the SAME session
+  // (not a fresh page load, which would trivially start at 0 regardless of
+  // whether the clear() call exists) drops them too. #new-scene-btn is the
+  // same trigger smoke.spec.js uses; the popup-fill steps are the same ones
+  // helpers.js's createSceneFromFixture uses internally, minus its page.goto
+  // -- a reload would replace window.__state's measureTool with a fresh,
+  // already-empty instance and prove nothing about this clear() call.
+  await takeOne();
+  await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(1);
+  const prevScene = await page.evaluate(() => window.__state?.sceneId ?? null);
+  await page.click('#new-scene-btn');
+  await page.locator('#ns-name').waitFor({ state: 'visible', timeout: 10000 });
+  await page.fill('#ns-name', 'smoke-measure-clear-scene2');
+  await page.setInputFiles('#ns-file', PORTRAIT_A);
+  await page.click('#ns-create');
+  await page.waitForFunction((prev) => {
+    const s = window.__state;
+    return !!s?.sceneId && s.sceneId !== prev && s.width > 0 && s.height > 0;
+  }, prevScene, { timeout: 60000 });
+  await expect.poll(() => page.evaluate(() => window.__measureCount())).toBe(0);
 
   expect(errors).toEqual([]);
 });
