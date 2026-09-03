@@ -1,7 +1,7 @@
 # Readouts and Measuring — Design Spec
 
 Date: 2026-09-03
-Status: Designed (grill-storm 2026-09-03); not yet implemented
+Status: Implemented 2026-09-03 (feat/readouts-measuring). See Deviations.
 Roadmap position: Spec 3. Follows Spec 1 (stage calibration + metric lights),
 Spec 2 (fixture table) and the calibration cube. Precedes Spec 4 (rig export).
 
