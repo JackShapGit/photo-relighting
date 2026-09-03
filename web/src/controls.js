@@ -11,7 +11,7 @@ import { PRESETS } from './presets.js';
 import { isTargeted, targetSpawnPoint, applyTargeting } from './targeting.js';
 import { toDisplay, parseLength } from './metric/units.js';
 import { syncLightFromFeet } from './metric/light-metric.js';
-import { throwAndDiameter, reasonTooltip } from './metric/measure.js';
+import { readoutCells } from './metric/measure.js';
 import { FIXTURE_TYPES, PRESETS as FIXTURE_PRESETS } from './rig/presets.js';
 import { detachFixture, detachAim, findPosition, setLightType, tryEnable } from './rig/fixture-sync.js';
 import { areaLabels } from './rig/geometry.js';
@@ -492,16 +492,13 @@ export function updateReadoutBlock(container, light, venue, units = 'ft') {
   if (!container || !light) return;
   const block = container.querySelector('.readout-block');
   if (!block) return;
-  // One geometry solve for both cells (ruling M3) — see the matching shape
-  // in rig-tab.js's updateReadouts. readoutCellText (Task 2) is unchanged
-  // and still used per-cell by the table's static render, where the double
-  // solve this avoids does not arise.
-  const r = throwAndDiameter(light, venue);
-  const title = r.reason === 'ok' ? '' : reasonTooltip(r.reason);
-  for (const [kind, v] of [['throw', r.throwFt], ['dia', r.fieldDiaFt]]) {
+  // One geometry solve for both cells — see readoutCells in measure.js and
+  // the matching shape in rig-tab.js's updateReadouts.
+  const cells = readoutCells(light, venue, units);
+  for (const kind of ['throw', 'dia']) {
     const el = block.querySelector(`[data-readout="${kind}"]`);
     if (!el) continue;
-    const text = r.reason === 'ok' ? toDisplay(v, units).toFixed(1) : '—';
+    const { text, title } = cells[kind];
     if (el.textContent !== text) el.textContent = text;
     if (el.title !== title) el.title = title;
   }

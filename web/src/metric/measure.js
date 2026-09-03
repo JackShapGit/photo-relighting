@@ -81,13 +81,24 @@ export function reasonTooltip(reason) {
 }
 
 /**
- * Text and tooltip for one readout cell. `kind` is 'throw' or 'dia'.
- * Pure so the fixtures table, the props pane and node --test can never word
- * the same fixture state differently.
+ * Both readout cells for one fixture from a single geometry solve. The
+ * per-frame updaters (rig-tab.js's updateReadouts, controls.js's
+ * updateReadoutBlock) use this so the table and the props pane cannot word
+ * the same fixture state differently, and so a drag's every pointermove
+ * solves throwAndDiameter once per fixture, not once per cell.
+ */
+export function readoutCells(light, venue, units) {
+  const r = throwAndDiameter(light, venue);
+  const title = r.reason === 'ok' ? '' : reasonTooltip(r.reason);
+  const cell = (v) => ({ text: r.reason === 'ok' ? toDisplay(v, units).toFixed(1) : '—', title });
+  return { throw: cell(r.throwFt), dia: cell(r.fieldDiaFt) };
+}
+
+/**
+ * Text and tooltip for one readout cell. `kind` is 'throw' or 'dia'. Task
+ * 2's static table render uses this per cell, where a fixture's two cells
+ * are rendered independently and the double geometry solve doesn't arise.
  */
 export function readoutCellText(light, venue, units, kind) {
-  const r = throwAndDiameter(light, venue);
-  if (r.reason !== 'ok') return { text: '—', title: reasonTooltip(r.reason) };
-  const v = kind === 'throw' ? r.throwFt : r.fieldDiaFt;
-  return { text: toDisplay(v, units).toFixed(1), title: '' };
+  return readoutCells(light, venue, units)[kind];
 }

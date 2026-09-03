@@ -17,7 +17,7 @@ import {
 } from './fixture-sync.js';
 import { syncLightFromFeet } from '../metric/light-metric.js';
 import { toDisplay, parseLength } from '../metric/units.js';
-import { readoutCellText, throwAndDiameter, reasonTooltip } from '../metric/measure.js';
+import { readoutCellText, readoutCells } from '../metric/measure.js';
 import { MAX_EMITTERS } from '../webgl/renderer.js';
 import { defaultHouse } from './geometry.js';
 import {
@@ -697,14 +697,12 @@ export function mountRigTab({ rootEl, getState, onVenueChange, onLightsChange, o
       const L = st.lights?.find((x) => x.id === tr.dataset.id);
       if (!L) continue;
       // One geometry solve per fixture, both cells formatted from it — see
-      // ruling M3. Calling readoutCellText per kind would re-run
-      // throwAndDiameter twice per fixture on every pointermove.
-      const r = throwAndDiameter(L, st.venue);
-      const title = r.reason === 'ok' ? '' : reasonTooltip(r.reason);
-      for (const [kind, v] of [['throw', r.throwFt], ['dia', r.fieldDiaFt]]) {
+      // readoutCells in measure.js and ruling M3.
+      const cells = readoutCells(L, st.venue, units);
+      for (const kind of ['throw', 'dia']) {
         const td = tr.querySelector(`[data-readout="${kind}"]`);
         if (!td) continue;
-        const text = r.reason === 'ok' ? toDisplay(v, units).toFixed(1) : '—';
+        const { text, title } = cells[kind];
         if (td.textContent !== text) td.textContent = text;
         if (td.title !== title) td.title = title;
       }

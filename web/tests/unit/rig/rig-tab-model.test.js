@@ -137,13 +137,19 @@ test('buildFixtureLight aims a hung fixture at stage centre; Custom keeps the ge
   // Ruling T4-B: newLightNode's fill default (lights.js) is Y-flat, so an
   // unaimed hung fixture would never cross the focus plane. A fixture hung
   // on a position gets a direction_ft pointing at [0, focus_height_ft,
-  // depth_ft/2] instead — down (Y < 0 from a pipe trim) and upstage
-  // (Z > 0, toward the stage) from a house position like FOH.
+  // depth_ft/2] instead. For FOH (upstage_ft -52, trim_ft 22) at offset 4,
+  // against V's focus_height_ft 5 and depth_ft 30: from [4, 22, -52] to
+  // [0, 5, 15] is [-4, -17, 67], normalized — computed independently, not
+  // copied from the implementation, so a wrong-but-plausible target (still
+  // downward, still upstage) would fail this.
   const L = buildFixtureLight(V, pos('FOH'), 'ers', 4, 1);
   assert.ok(Array.isArray(L.direction_ft));
-  assert.ok(L.direction_ft[1] < 0, 'aims down from a 22 ft trim to a 5 ft focus height');
-  assert.ok(L.direction_ft[2] > 0, 'aims upstage from FOH (upstage_ft -52) toward the stage');
-  assert.ok(Math.abs(Math.hypot(...L.direction_ft) - 1) < 1e-9, 'normalized');
+  const [x, y, z] = L.direction_ft;
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  assert.ok(near(x, -0.05777114517518152), `x ${x}`);
+  assert.ok(near(y, -0.24552736699452146), `y ${y}`);
+  assert.ok(near(z, 0.9676666816842904), `z ${z}`);
+  assert.ok(near(Math.hypot(x, y, z), 1), 'normalized');
 
   const C = buildFixtureLight(V, null, 'ers', 0, 1);
   assert.equal(C.direction_ft, undefined, 'Custom has no position to aim from; keeps the generic default');
