@@ -1472,7 +1472,7 @@ export function measureSegment(m) {
 
 `measure-overlay.js` then calls `measureSegment` instead of converting inline. Note `lengthFt` is computed from the **unconverted** world-feet points — Z-negation does not change a Euclidean distance, but deriving it from the converted values would be wrong in spirit and would break if the transform ever gained a scale.
 
-Add `web/tests/unit/3d/measure-lines.test.js` following `cube-lines.test.js`: assert the Z sign flips on both endpoints, the midpoint is the converted midpoint (not the midpoint of converted points — equal here, but assert the contract), and `lengthFt` matches `distanceFt` on the raw input. **This is the regression guard for the whole task:** without it, someone "simplifying" the overlay back to unconverted points would draw every measurement mirrored onto the audience side of the stage and nothing in the suite would fail.
+Add `web/tests/unit/measure-lines.test.js` following `cube-lines.test.js` — note that file lives **flat** in `web/tests/unit/`, not in a `3d/` subdirectory, and `package.json`'s `test:unit` glob has no `3d/` pattern, so a file placed under `web/tests/unit/3d/` would silently never run: assert the Z sign flips on both endpoints, the midpoint is the converted midpoint (not the midpoint of converted points — equal here, but assert the contract), and `lengthFt` matches `distanceFt` on the raw input. **This is the regression guard for the whole task:** without it, someone "simplifying" the overlay back to unconverted points would draw every measurement mirrored onto the audience side of the stage and nothing in the suite would fail.
 
 - [ ] **Step 3b: Wire picking in `3d/index.js`**
 
