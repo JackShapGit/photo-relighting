@@ -103,9 +103,9 @@ export function mountCalibrationPanel({
     <h3>Stage calibration</h3>
     <p class="cal-help">Drag the box's corners on the photo to fit the stage; type its real size here.</p>
     <div class="cal-camera" hidden></div>
-    <label>Width <input class="cal-w" type="number" step="0.1" min="0" /></label>
-    <label>Height <input class="cal-h" type="number" step="0.1" min="0" /></label>
-    <label>Depth <input class="cal-d" type="number" step="0.1" min="0" /></label>
+    <label>Width<span class="cal-unit-suffix"></span> <input class="cal-w" type="number" step="0.1" min="0" /></label>
+    <label>Height<span class="cal-unit-suffix"></span> <input class="cal-h" type="number" step="0.1" min="0" /></label>
+    <label>Depth<span class="cal-unit-suffix"></span> <input class="cal-d" type="number" step="0.1" min="0" /></label>
     <div class="cal-note" hidden></div>
     <div class="view-mode cal-units" role="group" aria-label="Calibration units">
       <button type="button" data-unit="ft" aria-pressed="true">ft</button>
@@ -113,7 +113,7 @@ export function mountCalibrationPanel({
     </div>
     <div class="cal-house" hidden>
       <div class="cal-house-title">House</div>
-      ${HOUSE_FIELDS.map(([k, l]) => `<label>${l} <input type="number" step="0.1" data-house="${k}" /></label>`).join('')}
+      ${HOUSE_FIELDS.map(([k, l]) => `<label>${l}<span class="cal-unit-suffix"></span> <input type="number" step="0.1" data-house="${k}" /></label>`).join('')}
       <div class="cal-house-note" hidden>House dimensions are estimates until you set them.</div>
       <div class="cal-house-msg" hidden></div>
     </div>
@@ -152,6 +152,11 @@ export function mountCalibrationPanel({
     for (const b of panelEl.querySelectorAll('.cal-units [data-unit]')) {
       b.setAttribute('aria-pressed', b.dataset.unit === units ? 'true' : 'false');
     }
+    // Task 9 (M-style unit-label gap): the Width/Height/Depth and house field
+    // labels never said which unit the number is in -- only the fixtures
+    // table did. Kept in sync unconditionally (not just when converting) so
+    // it's also right the first time the panel opens.
+    for (const span of panelEl.querySelectorAll('.cal-unit-suffix')) span.textContent = ` (${units})`;
     if (convert && prev !== units) {
       for (const [el, key] of FIELDS) {
         const untouched = el.value === shown[key] && prefill[key] != null;
@@ -167,6 +172,7 @@ export function mountCalibrationPanel({
     const b = e.target.closest('[data-unit]');
     if (b) setUnits(b.dataset.unit);
   });
+  for (const span of panelEl.querySelectorAll('.cal-unit-suffix')) span.textContent = ` (${units})`;   // label suffix before the first open()
 
   function fillDims() {
     const d = draft();

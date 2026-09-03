@@ -1065,6 +1065,12 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
   border: 1px solid var(--input-border, #444);
   border-radius: 4px;
   overflow: hidden;
+  /* Task 9 / ruling T9-A: overflow:hidden drops this item's flexbox auto
+     min-width to 0, so it (and #unit-toggle, same class) was the element
+     that collapsed to nothing when the header overflowed its 1600px
+     viewport in rig mode with a long calibrate badge -- an unclickable
+     segmented control, not a cosmetic squeeze. Never shrink it. */
+  flex-shrink: 0;
 }
 .view-mode button {
   background: transparent;
@@ -1177,7 +1183,20 @@ body.is-resizing-split #stage3d-wrap { pointer-events: none; }
 /* ─── Units toggle + calibrate badge (header) ───────────────────────────── */
 /* #unit-toggle reuses .view-mode. The Calibrate button doubles as the badge
  * once a calibration is applied ("40 × 20 × 30 ft"). */
-.calib-badge { font-size: 12px; padding: 4px 8px; white-space: nowrap; }
+.calib-badge {
+  font-size: 12px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  /* Task 9 / ruling T9-A: the badge is the only header element carrying
+     unbounded user-supplied content (scene/venue name), so it's the right
+     thing to absorb header overflow now that .view-mode/#unit-toggle no
+     longer will. min-width:0 lets it shrink past its content size in the
+     flex row; text-overflow:ellipsis degrades it legibly instead of
+     letting it silently vanish. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .calib-badge.is-calibrated {
   border-color: var(--accent, #4a7);
   color: var(--accent, #4a7);

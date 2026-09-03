@@ -303,3 +303,50 @@ test('measurements clear when the calibration changes or the scene switches', as
 
   expect(errors).toEqual([]);
 });
+
+test('units: switching to metres converts the readout columns and the ruler label', async ({ page }) => {
+  test.skip(!fs.existsSync(PORTRAIT_A), 'fixture missing');
+  const { errors } = await calibratedRigScene(page, 'smoke-measure-units');
+  await addHungFixture(page);
+
+  await page.locator('#measure-btn').click();
+  const wrap = await page.locator('#canvas-wrap').boundingBox();
+  const at = (fx, fy) => [wrap.x + wrap.width * fx, wrap.y + wrap.height * fy];
+  await page.mouse.move(...at(0.5, 0.5));
+  await page.mouse.click(...at(0.30, 0.62));
+  await page.mouse.click(...at(0.70, 0.62));
+
+  const throwCell = page.locator('#rig-root tr.rig-fixture [data-readout="throw"]').first();
+  const ftThrow = parseFloat(await throwCell.textContent());
+  const ftLabel = await page.locator('#measure-overlay .measure-label').first().textContent();
+  expect(ftLabel).toContain('ft');
+
+  // M5: the props-pane readout block's labels are as unit-aware as the
+  // table's column headers -- both should say "(ft)" before the toggle.
+  await expect(page.locator('.readout-block .readout-key').first()).toContainText('(ft)');
+
+  // Task 9 finding beyond M5: the calibration panel's Width/Height/Depth
+  // labels converted their values correctly but never said which unit --
+  // same gap as M5, on a different surface. Its own in-panel unit toggle
+  // (independent of the header's #unit-toggle) drives the check.
+  await page.evaluate(() => window.__calPanel.open());
+  await expect(page.locator('#calib-panel')).toBeVisible();
+  const widthLabel = page.locator('#calib-panel label').filter({ hasText: 'Width' });
+  await expect(widthLabel).toContainText('(ft)');
+  await page.click('#calib-panel .cal-units [data-unit="m"]');
+  await expect(widthLabel).toContainText('(m)');
+  await page.click('#calib-panel .cal-units [data-unit="ft"]');
+  await expect(widthLabel).toContainText('(ft)');
+  await page.click('#calib-panel .cal-close');
+
+  await page.locator('#unit-toggle [data-unit="m"]').click();
+
+  await expect(page.locator('th', { hasText: 'Throw (m)' })).toBeVisible();
+  const mThrow = parseFloat(await throwCell.textContent());
+  expect(mThrow).toBeLessThan(ftThrow);                     // 1 ft = 0.3048 m
+  expect(Math.abs(mThrow - ftThrow * 0.3048)).toBeLessThan(0.15);
+  await expect(page.locator('#measure-overlay .measure-label').first()).toContainText('m');
+  await expect(page.locator('.readout-block .readout-key').first()).toContainText('(m)');
+
+  expect(errors).toEqual([]);
+});

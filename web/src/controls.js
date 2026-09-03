@@ -282,8 +282,8 @@ function renderLightProps(L, slotIdx, container, redraw, onStructural, state = {
     </div>
     ${rigBlock}
     <div class="readout-block">
-      <div class="readout-row"><span class="readout-key">Throw</span><span class="readout-val" data-readout="throw">—</span></div>
-      <div class="readout-row"><span class="readout-key">Field Ø</span><span class="readout-val" data-readout="dia">—</span></div>
+      <div class="readout-row"><span class="readout-key">Throw (${units})</span><span class="readout-val" data-readout="throw">—</span></div>
+      <div class="readout-row"><span class="readout-key">Field Ø (${units})</span><span class="readout-val" data-readout="dia">—</span></div>
     </div>
     <label>Type
       <select class="type" ${rig ? 'disabled title="Set by the fixture type"' : ''}>
