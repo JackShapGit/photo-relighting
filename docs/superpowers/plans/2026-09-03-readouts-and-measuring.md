@@ -678,10 +678,15 @@ In `web/src/rig/rig-tab.js`, inside `mountRigTab`, add:
     for (const tr of rootEl.querySelectorAll('tr.rig-fixture[data-id]')) {
       const L = st.lights?.find((x) => x.id === tr.dataset.id);
       if (!L) continue;
-      for (const kind of ['throw', 'dia']) {
+      // One geometry solve per fixture, both cells formatted from it — see
+      // ruling M3. Calling readoutCellText per kind would re-run
+      // throwAndDiameter twice per fixture on every pointermove.
+      const r = throwAndDiameter(L, st.venue);
+      const title = r.reason === 'ok' ? '' : reasonTooltip(r.reason);
+      for (const [kind, v] of [['throw', r.throwFt], ['dia', r.fieldDiaFt]]) {
         const td = tr.querySelector(`[data-readout="${kind}"]`);
         if (!td) continue;
-        const { text, title } = readoutCellText(L, st.venue, units, kind);
+        const text = r.reason === 'ok' ? toDisplay(v, units).toFixed(1) : '—';
         if (td.textContent !== text) td.textContent = text;
         if (td.title !== title) td.title = title;
       }
@@ -715,6 +720,23 @@ const redraw = () => {
 ```
 
 **Ordering constraint:** these two calls must be the last thing `redraw` does. Placing them in the handle callback instead would read the previous frame's `position_ft`.
+
+- [ ] **Step 3b: Directed cleanups from the Task 3 review**
+
+Four Minor findings from Task 3's review, folded here because this task rewrites the per-frame path and touches both readout consumers. All four are defects in the plan's own earlier text, not in the Task 3 implementation.
+
+**M1 — delete `web/tests/unit/readout-block.test.js`.** It calls one pure function twice with identical arguments and asserts `deepEqual`, so it can only fail if the function becomes non-deterministic. It does not prove the two call sites render identically, which is what its name claims. The real cross-surface guarantee is structural (both surfaces call the same function) and is asserted end-to-end by Task 9's units test. Unit count goes 223 → 222; that is correct, not a regression.
+
+**M2 — `.readout-block` uses an undefined CSS variable.** `--panel-2` is defined nowhere in the codebase, so the `var()` always resolves to its hardcoded fallback and the block never participates in the light/dark theme swap. Replace the rule in `web/playground.css` with real tokens:
+
+```css
+.readout-block { margin: 8px 0; padding: 6px 8px; border-radius: 4px;
+                 background: var(--bg-hover); border: 1px solid var(--border); }
+```
+
+**M3 — one geometry solve per fixture per frame.** Already applied to `updateReadouts` in Step 3 above. Apply the same shape to `updateReadoutBlock` in `web/src/controls.js`: call `throwAndDiameter(light, venue)` once, derive both values and the shared tooltip from that single result, instead of calling `readoutCellText` once per kind. Keep `readoutCellText` exported and unchanged — Task 2's static table render still uses it per cell, where the double solve does not occur.
+
+**M4 — move the readout block next to the rig fieldset.** Task 3 appended it after the entire `container.innerHTML` template, which puts it below Type, Position, Direction, Intensity, Color, Kelvin, Cone, Softness, Falloff, Gobo, Affects and Enabled — the bottom of a long pane, likely below the fold. These numbers describe the fixture's rig geometry, so they belong with the rig fields. Move the `.readout-block` markup into the template immediately after the rig fieldset (`controls.js` around lines 269–276) rather than appending it afterwards, and keep `updateReadoutBlock(container, L, state.venue, state.units || 'ft')` as the call that fills it once the template is in the DOM.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1547,7 +1569,7 @@ MSG
 **Scope — this is a closed list, not an open sweep.** Audit exactly these length-displaying surfaces:
 
 1. Rig tab: positions table, fixtures table (incl. the new columns), status line
-2. Props pane: light position/target fields, rig fieldset, the new readout block
+2. Props pane: light position/target fields, rig fieldset, the new readout block — **known gap (M5):** the block's labels read plain "Throw" / "Field Ø" with no unit, while the fixtures table shows `Throw (ft)` / `Ø (ft)`. Both render the same converted number but only the table says which unit it is in. Give the props labels the same `(${units})` suffix.
 3. Calibration panel: dimension inputs, house fieldset, the camera line
 4. Cube overlay 2D: the three stage labels and the house labels
 5. Venue editor: dims, house, positions
