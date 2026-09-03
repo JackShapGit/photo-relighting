@@ -33,7 +33,7 @@ import { mountLightbox } from './polish-lightbox.js';
 import { init as initRenderer, setAssets, draw, reloadMaskTexture } from './webgl/renderer.js';
 import { mountHandles } from './handles.js';
 import { applyTargeting } from './targeting.js';
-import { renderProps, renderAddLightPicker, setGoboPresets } from './controls.js';
+import { renderProps, renderAddLightPicker, setGoboPresets, updateReadoutBlock } from './controls.js';
 import { mountTree } from './tree.js';
 import { initTheme } from './theme.js';
 import { openNewScenePopup } from './new-scene-popup.js';
@@ -280,6 +280,12 @@ const redraw = () => {
   // (before the browser composites) because WebGL drawing buffers may be
   // cleared after the next compositor cycle when preserveDrawingBuffer=false.
   refreshPointCloudColor();
+  // Spec 3: readouts track a drag live. Last thing redraw does, so both
+  // read the feet fields syncDraggedLights has already re-derived this
+  // frame — hooked earlier (or in the handle callback) they'd lag by one move.
+  rigTab?.updateReadouts();
+  const sel = state.lights?.find((L) => L.id === state.selectedId);
+  if (sel) updateReadoutBlock(document.getElementById('props-content'), sel, state.venue, state.units || 'ft');
 };
 const redrawAndSave = () => {
   syncDraggedLights();                 // engine-space edits re-derive feet fields first
